@@ -7,24 +7,18 @@ public class LaserShooter : MonoBehaviour
 {
     [Header("Laser Settings")]
     public XRNode controllerNode = XRNode.RightHand;
-    public float laserRange = 100f;
-    public float laserDuration = 0.1f;    // Combien de temps le laser reste visible
-    public float fakeSliceForce = 15f;    // Force envoyée au fruit coupé pour séparer les morceaux
+    [Header("Kunai Settings")]
+    public float throwVelocity = 250f; // Vitesse extrême pour un impact instantané
+    public float cooldown = 0.05f; // Cadence de tir presque immédiate
 
-    private LineRenderer lineRenderer;
+    private float lastThrowTime;
     private bool previousTriggerState = false;
 
     void Awake()
     {
-        lineRenderer = GetComponent<LineRenderer>();
-        lineRenderer.enabled = false;
-        
-        // Ajuster l'épaisseur du laser si ce n'est pas déjà fait dans l'éditeur
-        if (lineRenderer.startWidth == 1f)
-        {
-            lineRenderer.startWidth = 0.02f;
-            lineRenderer.endWidth = 0.02f;
-        }
+        // Désactive l'ancien LineRenderer du laser s'il existe toujours sur l'objet
+        var lr = GetComponent<LineRenderer>();
+        if (lr != null) lr.enabled = false;
     }
 
     void Update()
@@ -35,55 +29,36 @@ public class LaserShooter : MonoBehaviour
             // Vérifie si la gâchette principale ("Trigger") est pressée
             if (device.TryGetFeatureValue(CommonUsages.triggerButton, out bool triggerValue))
             {
-                // On s'assure de ne tirer qu'une seule fois au moment de l'appui
-                if (triggerValue && !previousTriggerState)
+                if (triggerValue && !previousTriggerState && Time.time >= lastThrowTime + cooldown)
                 {
-                    ShootLaser();
+                    ShootKunai();
+                    lastThrowTime = Time.time;
                 }
                 previousTriggerState = triggerValue;
             }
         }
     }
 
-    void ShootLaser()
+    void ShootKunai()
     {
-        // Active l'affichage du laser
-        StartCoroutine(ShowLaserRoutine());
-
-        RaycastHit hit;
-        Vector3 rayStart = transform.position;
-        Vector3 rayDir = transform.forward;
+        // Le générateur de Kunai (Modèle procédural)
+        GameObject kunai = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        kunai.name = "ThrowingKnife";
         
-        // Par défaut, le laser tire jusqu'à sa portée maximale si on ne touche rien
-        Vector3 hitPosition = rayStart + rayDir * laserRange;
+        // Un kunai est fin et allongé
+        kunai.transform.localScale = new Vector3(0.04f, 0.2f, 0.04f); 
+        
+        // Oriente le cylindre pour qu'il pointe vers l'avant
+        kunai.transform.position = transform.position + transform.forward * 0.1f;
+        kunai.transform.rotation = transform.rotation;
+        kunai.transform.Rotate(90f, 0, 0); // Le cylindre pointe vers le haut(Y) par défaut
+        
+        // Matériau métallique basique
+        var rend = kunai.GetComponent<MeshRenderer>();
+        rend.material.color = new Color(0.7f, 0.7f, 0.7f);
 
-        if (Physics.Raycast(rayStart, rayDir, out hit, laserRange))
-        {
-            hitPosition = hit.point;
-
-            FruitTarget fruit = hit.collider.GetComponent<FruitTarget>();
-            if (fruit != null)
-            {
-                // On envoie la direction du tir comme force de coupe avec une force virtuelle élevée
-                fruit.Slice(rayDir, hitPosition, rayDir * fakeSliceForce);
-            }
-
-            Bomb bomb = hit.collider.GetComponent<Bomb>();
-            if (bomb != null)
-            {
-                bomb.Slice();
-            }
-        }
-
-        // Met à jour la position de la ligne (départ -> impact)
-        lineRenderer.SetPosition(0, rayStart);
-        lineRenderer.SetPosition(1, hitPosition);
-    }
-
-    private IEnumerator ShowLaserRoutine()
-    {
-        lineRenderer.enabled = true;
-        yield return new WaitForSeconds(laserDuration);
-        lineRenderer.enabled = false;
+        // Ajout de la mécanique de projectile qu'on a codée
+        var proj = kunai.AddComponent<KunaiProjectile>();
+        proj.velocity = throwVelocity;
     }
 }
