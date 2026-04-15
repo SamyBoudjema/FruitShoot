@@ -25,6 +25,10 @@ public class MenuManager : MonoBehaviour
     private TextMeshProUGUI goFruitsText;
     private TextMeshProUGUI goBombsText;
 
+    private WeaponType selectedWeapon = WeaponType.Couteaux;
+    private Button btnWeaponKnives;
+    private Button btnWeaponSabre;
+
     private void Start()
     {
         AutoWirePanelsIfNeeded();
@@ -71,6 +75,7 @@ public class MenuManager : MonoBehaviour
             {
                 GameManager.Instance.gameDuration = Mathf.Clamp(defouloirDurationMinutes, 1f, 20f) * 60f;
                 GameManager.Instance.difficulty = defouloirDifficulty;
+                GameManager.Instance.weapon = selectedWeapon;
             }
             GameManager.Instance.StartGame();
         }
@@ -270,37 +275,48 @@ public class MenuManager : MonoBehaviour
         );
 
         var rect = canvasGo.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(900, 550);
+        rect.sizeDelta = new Vector2(950, 900);
         rect.localScale = Vector3.one * 0.002f;
         rect.position = GetDefaultMenuPosition();
         rect.rotation = Quaternion.LookRotation(GetFlattenedForward(Camera.main), Vector3.up);
 
+        // ===== FOND PRINCIPAL SOMBRE =====
         var panelGo = new GameObject("Panel");
         panelGo.layer = canvasGo.layer;
         panelGo.transform.SetParent(canvasGo.transform, false);
         var panelImage = panelGo.AddComponent<Image>();
-        panelImage.color = new Color(0, 0, 0, 0.55f);
+        panelImage.color = new Color(0.05f, 0.05f, 0.12f, 0.92f); // Bleu très sombre quasi opaque
         var panelRect = panelGo.GetComponent<RectTransform>();
         panelRect.anchorMin = Vector2.zero;
         panelRect.anchorMax = Vector2.one;
         panelRect.offsetMin = Vector2.zero;
         panelRect.offsetMax = Vector2.zero;
 
+        // ===== BORDURE HAUT (accent cyan) =====
+        CreateAccentBar(panelGo.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -4), 6f, new Color(0f, 0.85f, 1f, 0.7f));
+        // ===== BORDURE BAS (accent cyan) =====
+        CreateAccentBar(panelGo.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 4), 6f, new Color(0f, 0.85f, 1f, 0.7f));
+
         CreateTitle(panelGo.transform);
+
+        // ===== SÉPARATEUR SOUS LE TITRE =====
+        CreateAccentBar(panelGo.transform, new Vector2(0.1f, 1f), new Vector2(0.9f, 1f), new Vector2(0, -140), 3f, new Color(1f, 1f, 1f, 0.15f));
 
         defouloirOptionsGroup = CreateDefouloirOptions(panelGo.transform);
 
         // Mode Selection Buttons
-        btnSelectDefouloir = CreateButton(panelGo.transform, "Bouton_Select_Defouloir", "Mode Défouloir");
+        btnSelectDefouloir = CreateStyledModeButton(panelGo.transform, "Bouton_Select_Defouloir", "DEFOULOIR", new Color(1f, 0.4f, 0.2f, 0.35f));
         btnSelectDefouloir.onClick.AddListener(() => SelectMode(GameMode.Defouloir));
         
-        btnSelectRecette = CreateButton(panelGo.transform, "Bouton_Select_Recette", "Mode Recette");
+        btnSelectRecette = CreateStyledModeButton(panelGo.transform, "Bouton_Select_Recette", "RECETTE", new Color(0.2f, 0.7f, 1f, 0.35f));
         btnSelectRecette.onClick.AddListener(() => SelectMode(GameMode.Recette));
 
         // Play Button
         var btnPlay = CreateButton(panelGo.transform, "Bouton_Jouer", "JOUER");
+        btnPlay.GetComponent<Image>().color = new Color(0f, 0.7f, 0.3f, 0.5f);
+        var playText = btnPlay.GetComponentInChildren<TextMeshProUGUI>();
+        if (playText != null) { playText.fontSize = 52; playText.color = new Color(0.7f, 1f, 0.7f); }
         btnPlay.onClick.AddListener(StartSelectedMode);
-        btnPlay.GetComponent<Image>().color = new Color(0.2f, 0.8f, 0.2f, 0.4f);
 
         PositionButtons(btnSelectDefouloir.GetComponent<RectTransform>(), btnSelectRecette.GetComponent<RectTransform>(), btnPlay.GetComponent<RectTransform>());
         
@@ -308,6 +324,30 @@ public class MenuManager : MonoBehaviour
         if (defouloirOptionsGroup != null) defouloirOptionsGroup.SetActive(false);
 
         return canvasGo;
+    }
+
+    private static void CreateAccentBar(Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 offset, float height, Color color)
+    {
+        var bar = new GameObject("AccentBar");
+        bar.layer = parent.gameObject.layer;
+        bar.transform.SetParent(parent, false);
+        var img = bar.AddComponent<Image>();
+        img.color = color;
+        var rt = bar.GetComponent<RectTransform>();
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = offset;
+        rt.sizeDelta = new Vector2(0, height);
+    }
+
+    private static Button CreateStyledModeButton(Transform parent, string name, string label, Color bgColor)
+    {
+        var btn = CreateButton(parent, name, label);
+        btn.GetComponent<Image>().color = bgColor;
+        var textTmp = btn.GetComponentInChildren<TextMeshProUGUI>();
+        if (textTmp != null) { textTmp.fontSize = 38; textTmp.color = Color.white; }
+        return btn;
     }
 
     private GameObject CreateDefouloirOptions(Transform parent)
@@ -320,43 +360,66 @@ public class MenuManager : MonoBehaviour
         rt.anchorMin = new Vector2(0.5f, 1f);
         rt.anchorMax = new Vector2(0.5f, 1f);
         rt.pivot = new Vector2(0.5f, 1f);
-        rt.anchoredPosition = new Vector2(0, -240);
-        rt.sizeDelta = new Vector2(700, 160);
+        rt.anchoredPosition = new Vector2(0, -310);
+        rt.sizeDelta = new Vector2(800, 400);
 
-        var header = CreateLabel(group.transform, "Options Défouloir", 34);
+        // Fond semi-transparent pour la zone d'options
+        var optionsBg = new GameObject("OptionsBg");
+        optionsBg.layer = group.layer;
+        optionsBg.transform.SetParent(group.transform, false);
+        var optBgImg = optionsBg.AddComponent<Image>();
+        optBgImg.color = new Color(1f, 1f, 1f, 0.05f);
+        var optBgRt = optionsBg.GetComponent<RectTransform>();
+        optBgRt.anchorMin = Vector2.zero; optBgRt.anchorMax = Vector2.one;
+        optBgRt.offsetMin = new Vector2(-10, -10); optBgRt.offsetMax = new Vector2(10, 10);
+
+        // === HEADER ===
+        var header = CreateLabel(group.transform, "-- PARAMETRES --", 30);
+        header.color = new Color(0f, 0.85f, 1f);
         header.rectTransform.anchorMin = new Vector2(0.5f, 1f);
         header.rectTransform.anchorMax = new Vector2(0.5f, 1f);
         header.rectTransform.pivot = new Vector2(0.5f, 1f);
-        header.rectTransform.anchoredPosition = new Vector2(0, -5);
-        header.rectTransform.sizeDelta = new Vector2(680, 40);
+        header.rectTransform.anchoredPosition = new Vector2(0, -10);
+        header.rectTransform.sizeDelta = new Vector2(750, 40);
 
-        var durationLabel = CreateLabel(group.transform, $"Durée: {Mathf.RoundToInt(defouloirDurationMinutes)} min", 28);
+        // === LIGNE 1 : DURÉE ===
+        float row1Y = -65f;
+        var durationLabel = CreateLabel(group.transform, $"Duree: {Mathf.RoundToInt(defouloirDurationMinutes)} min", 26);
         durationLabel.alignment = TextAlignmentOptions.Left;
-        durationLabel.rectTransform.anchorMin = new Vector2(0, 0.55f);
-        durationLabel.rectTransform.anchorMax = new Vector2(0, 0.55f);
+        durationLabel.color = new Color(0.8f, 0.8f, 0.8f);
+        durationLabel.rectTransform.anchorMin = new Vector2(0, 1f);
+        durationLabel.rectTransform.anchorMax = new Vector2(0, 1f);
         durationLabel.rectTransform.pivot = new Vector2(0, 0.5f);
-        durationLabel.rectTransform.anchoredPosition = new Vector2(10, 0);
-        durationLabel.rectTransform.sizeDelta = new Vector2(340, 35);
+        durationLabel.rectTransform.anchoredPosition = new Vector2(20, row1Y);
+        durationLabel.rectTransform.sizeDelta = new Vector2(300, 35);
 
         var slider = CreateSlider(group.transform);
-        slider.minValue = 1f;
-        slider.maxValue = 15f;
-        slider.wholeNumbers = true;
+        slider.minValue = 1f; slider.maxValue = 15f; slider.wholeNumbers = true;
         slider.value = Mathf.Clamp(defouloirDurationMinutes, slider.minValue, slider.maxValue);
+        var sliderRt = slider.GetComponent<RectTransform>();
+        sliderRt.anchorMin = new Vector2(0.5f, 1f);
+        sliderRt.anchorMax = new Vector2(0.5f, 1f);
+        sliderRt.anchoredPosition = new Vector2(160, row1Y);
         slider.onValueChanged.AddListener(v =>
         {
             defouloirDurationMinutes = v;
             if (durationLabel != null)
-                durationLabel.text = $"Durée: {Mathf.RoundToInt(defouloirDurationMinutes)} min";
+                durationLabel.text = $"Duree: {Mathf.RoundToInt(defouloirDurationMinutes)} min";
         });
 
-        var diffLabel = CreateLabel(group.transform, "Difficulté:", 28);
+        // === SÉPARATEUR ===
+        CreateAccentBar(group.transform, new Vector2(0.05f, 1f), new Vector2(0.95f, 1f), new Vector2(0, -100), 2f, new Color(1f, 1f, 1f, 0.1f));
+
+        // === LIGNE 2 : DIFFICULTÉ ===
+        float row2Y = -135f;
+        var diffLabel = CreateLabel(group.transform, "Difficulte:", 26);
         diffLabel.alignment = TextAlignmentOptions.Left;
-        diffLabel.rectTransform.anchorMin = new Vector2(0, 0.15f);
-        diffLabel.rectTransform.anchorMax = new Vector2(0, 0.15f);
+        diffLabel.color = new Color(0.8f, 0.8f, 0.8f);
+        diffLabel.rectTransform.anchorMin = new Vector2(0, 1f);
+        diffLabel.rectTransform.anchorMax = new Vector2(0, 1f);
         diffLabel.rectTransform.pivot = new Vector2(0, 0.5f);
-        diffLabel.rectTransform.anchoredPosition = new Vector2(10, 0);
-        diffLabel.rectTransform.sizeDelta = new Vector2(200, 35);
+        diffLabel.rectTransform.anchoredPosition = new Vector2(20, row2Y);
+        diffLabel.rectTransform.sizeDelta = new Vector2(220, 35);
 
         var easy = CreateSmallButton(group.transform, "Facile");
         var medium = CreateSmallButton(group.transform, "Moyen");
@@ -366,10 +429,53 @@ public class MenuManager : MonoBehaviour
         medium.onClick.AddListener(() => SetDifficulty(Difficulty.Moyen, easy, medium, hard));
         hard.onClick.AddListener(() => SetDifficulty(Difficulty.Difficile, easy, medium, hard));
 
-        LayoutDifficultyButtons(easy.GetComponent<RectTransform>(), medium.GetComponent<RectTransform>(), hard.GetComponent<RectTransform>());
+        // Position difficulté sur la même ligne
+        LayoutRowButtons(easy.GetComponent<RectTransform>(), 0.32f, row2Y);
+        LayoutRowButtons(medium.GetComponent<RectTransform>(), 0.52f, row2Y);
+        LayoutRowButtons(hard.GetComponent<RectTransform>(), 0.78f, row2Y);
         SetDifficulty(defouloirDifficulty, easy, medium, hard);
+
+        // === SÉPARATEUR ===
+        CreateAccentBar(group.transform, new Vector2(0.05f, 1f), new Vector2(0.95f, 1f), new Vector2(0, -175), 2f, new Color(1f, 1f, 1f, 0.1f));
+
+        // === LIGNE 3 : ARME ===
+        float row3Y = -210f;
+        var weaponLabel = CreateLabel(group.transform, "Arme:", 26);
+        weaponLabel.alignment = TextAlignmentOptions.Left;
+        weaponLabel.color = new Color(0.8f, 0.8f, 0.8f);
+        weaponLabel.rectTransform.anchorMin = new Vector2(0, 1f);
+        weaponLabel.rectTransform.anchorMax = new Vector2(0, 1f);
+        weaponLabel.rectTransform.pivot = new Vector2(0, 0.5f);
+        weaponLabel.rectTransform.anchoredPosition = new Vector2(20, row3Y);
+        weaponLabel.rectTransform.sizeDelta = new Vector2(220, 35);
+
+        btnWeaponKnives = CreateSmallButton(group.transform, "Couteaux");
+        btnWeaponSabre = CreateSmallButton(group.transform, "Sabre");
+
+        btnWeaponKnives.onClick.AddListener(() => SetWeapon(WeaponType.Couteaux));
+        btnWeaponSabre.onClick.AddListener(() => SetWeapon(WeaponType.SabreLaser));
+
+        LayoutRowButtons(btnWeaponKnives.GetComponent<RectTransform>(), 0.38f, row3Y);
+        LayoutRowButtons(btnWeaponSabre.GetComponent<RectTransform>(), 0.68f, row3Y);
+
+        SetWeapon(selectedWeapon);
         
         return group;
+    }
+
+    private static void LayoutRowButtons(RectTransform rt, float anchorX, float yOffset)
+    {
+        rt.anchorMin = new Vector2(anchorX, 1f);
+        rt.anchorMax = new Vector2(anchorX, 1f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(0, yOffset);
+    }
+
+    private void SetWeapon(WeaponType w)
+    {
+        selectedWeapon = w;
+        SetButtonSelected(btnWeaponKnives, w == WeaponType.Couteaux);
+        SetButtonSelected(btnWeaponSabre, w == WeaponType.SabreLaser);
     }
 
     private void SetDifficulty(Difficulty d, Button easy, Button medium, Button hard)
@@ -384,7 +490,13 @@ public class MenuManager : MonoBehaviour
     {
         if (btn == null) return;
         var img = btn.GetComponent<Image>();
-        if (img != null) img.color = selected ? new Color(1f, 1f, 1f, 0.25f) : new Color(1f, 1f, 1f, 0.12f);
+        if (img != null) img.color = selected 
+            ? new Color(0f, 0.85f, 1f, 0.35f)  // Cyan lumineux quand sélectionné
+            : new Color(1f, 1f, 1f, 0.08f);      // Quasi invisible sinon
+        var txt = btn.GetComponentInChildren<TextMeshProUGUI>();
+        if (txt != null) txt.color = selected
+            ? new Color(0.7f, 1f, 1f)
+            : new Color(0.5f, 0.5f, 0.5f);
     }
 
     private static void LayoutDifficultyButtons(RectTransform easy, RectTransform medium, RectTransform hard)
@@ -502,32 +614,53 @@ public class MenuManager : MonoBehaviour
     {
         var btn = CreateButton(parent, $"Diff_{label}", label);
         var rt = btn.GetComponent<RectTransform>();
-        if (rt != null) rt.sizeDelta = new Vector2(210, 65);
+        if (rt != null) rt.sizeDelta = new Vector2(150, 55);
 
         var textTmp = btn.gameObject.GetComponentInChildren<TextMeshProUGUI>();
-        if (textTmp != null) textTmp.fontSize = 32;
+        if (textTmp != null) textTmp.fontSize = 26;
 
         return btn;
     }
 
     private static void CreateTitle(Transform parent)
     {
+        // Titre principal
         var titleGo = new GameObject("Title");
         titleGo.layer = parent.gameObject.layer;
         titleGo.transform.SetParent(parent, false);
         var tmp = titleGo.AddComponent<TextMeshProUGUI>();
         tmp.text = "EDN XR";
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.fontSize = 60;
-        tmp.color = Color.white;
+        tmp.fontSize = 72;
+        tmp.color = new Color(0f, 0.9f, 1f); // Cyan flamboyant
+        tmp.fontStyle = FontStyles.Bold;
         tmp.enableWordWrapping = false;
 
         var rt = titleGo.GetComponent<RectTransform>();
         rt.anchorMin = new Vector2(0.5f, 1f);
         rt.anchorMax = new Vector2(0.5f, 1f);
         rt.pivot = new Vector2(0.5f, 1f);
-        rt.anchoredPosition = new Vector2(0, -20);
-        rt.sizeDelta = new Vector2(700, 90);
+        rt.anchoredPosition = new Vector2(0, -15);
+        rt.sizeDelta = new Vector2(700, 80);
+
+        // Sous-titre
+        var subGo = new GameObject("Subtitle");
+        subGo.layer = parent.gameObject.layer;
+        subGo.transform.SetParent(parent, false);
+        var subTmp = subGo.AddComponent<TextMeshProUGUI>();
+        subTmp.text = "FRUIT NINJA VR";
+        subTmp.alignment = TextAlignmentOptions.Center;
+        subTmp.fontSize = 24;
+        subTmp.color = new Color(1f, 1f, 1f, 0.4f);
+        subTmp.fontStyle = FontStyles.Italic;
+        subTmp.enableWordWrapping = false;
+
+        var subRt = subGo.GetComponent<RectTransform>();
+        subRt.anchorMin = new Vector2(0.5f, 1f);
+        subRt.anchorMax = new Vector2(0.5f, 1f);
+        subRt.pivot = new Vector2(0.5f, 1f);
+        subRt.anchoredPosition = new Vector2(0, -90);
+        subRt.sizeDelta = new Vector2(700, 35);
     }
 
     private static Button CreateButton(Transform parent, string name, string label)
@@ -537,13 +670,16 @@ public class MenuManager : MonoBehaviour
         go.transform.SetParent(parent, false);
 
         var img = go.AddComponent<Image>();
-        img.color = new Color(1f, 1f, 1f, 0.12f);
+        img.color = new Color(1f, 1f, 1f, 0.10f);
 
         var btn = go.AddComponent<Button>();
         var colors = btn.colors;
-        colors.highlightedColor = new Color(1f, 1f, 1f, 0.2f);
-        colors.pressedColor = new Color(1f, 1f, 1f, 0.28f);
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(0.7f, 1f, 1f, 1f);
+        colors.pressedColor = new Color(0.5f, 0.9f, 0.9f, 1f);
+        colors.selectedColor = Color.white;
         btn.colors = colors;
+        btn.targetGraphic = img;
 
         var rt = go.GetComponent<RectTransform>();
         rt.sizeDelta = new Vector2(520, 90);
@@ -554,37 +690,39 @@ public class MenuManager : MonoBehaviour
         var tmp = textGo.AddComponent<TextMeshProUGUI>();
         tmp.text = label;
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.fontSize = 44;
-        tmp.color = Color.white;
+        tmp.fontSize = 40;
+        tmp.color = new Color(0.9f, 0.95f, 1f);
 
         var textRt = textGo.GetComponent<RectTransform>();
         textRt.anchorMin = Vector2.zero;
         textRt.anchorMax = Vector2.one;
-        textRt.offsetMin = new Vector2(20, 10);
-        textRt.offsetMax = new Vector2(-20, -10);
+        textRt.offsetMin = new Vector2(10, 5);
+        textRt.offsetMax = new Vector2(-10, -5);
 
         return btn;
     }
 
     private static void PositionButtons(RectTransform defouloir, RectTransform recette, RectTransform play)
     {
+        // Boutons de mode centrés sous le titre
         defouloir.anchorMin = new Vector2(0.5f, 1f);
         defouloir.anchorMax = new Vector2(0.5f, 1f);
         defouloir.pivot = new Vector2(0.5f, 1f);
-        defouloir.anchoredPosition = new Vector2(-200, -130);
-        defouloir.sizeDelta = new Vector2(380, 80);
+        defouloir.anchoredPosition = new Vector2(-220, -160);
+        defouloir.sizeDelta = new Vector2(420, 100);
 
         recette.anchorMin = new Vector2(0.5f, 1f);
         recette.anchorMax = new Vector2(0.5f, 1f);
         recette.pivot = new Vector2(0.5f, 1f);
-        recette.anchoredPosition = new Vector2(200, -130);
-        recette.sizeDelta = new Vector2(380, 80);
+        recette.anchoredPosition = new Vector2(220, -160);
+        recette.sizeDelta = new Vector2(420, 100);
         
+        // Bouton Jouer tout en bas, bien visible
         play.anchorMin = new Vector2(0.5f, 0f);
         play.anchorMax = new Vector2(0.5f, 0f);
         play.pivot = new Vector2(0.5f, 0f);
-        play.anchoredPosition = new Vector2(0, 30);
-        play.sizeDelta = new Vector2(400, 90);
+        play.anchoredPosition = new Vector2(0, 40);
+        play.sizeDelta = new Vector2(500, 120);
     }
 
     private void EnsureEventSystemExists()
@@ -631,22 +769,16 @@ public class MenuManager : MonoBehaviour
             enableUiField.SetValue(rayInteractor, true);
         }
 
-        // Add a line visual so the player sees where they're pointing.
+        // On ne crée plus de LineRenderer / LineVisual ici pour éviter le laser vert moche.
+        // Le crosshair du LaserShooter s'occupe du viseur.
         var lineVisualType = Type.GetType("UnityEngine.XR.Interaction.Toolkit.XRInteractorLineVisual, Unity.XR.Interaction.Toolkit");
-        if (lineVisualType != null && rightController.GetComponent(lineVisualType) == null)
+        if (lineVisualType != null)
         {
-            // Ensure a LineRenderer exists for the visual.
-            if (rightController.GetComponent<LineRenderer>() == null)
-            {
-                var lr = rightController.AddComponent<LineRenderer>();
-                lr.positionCount = 2;
-                lr.startWidth = 0.005f;
-                lr.endWidth = 0.0025f;
-                lr.useWorldSpace = true;
-            }
-
-            rightController.AddComponent(lineVisualType);
+            var existing = rightController.GetComponent(lineVisualType);
+            if (existing != null) ((MonoBehaviour)existing).enabled = false;
         }
+        var existingLR = rightController.GetComponent<LineRenderer>();
+        if (existingLR != null) existingLR.enabled = false;
     }
 
     private GameObject FindRightControllerObject()

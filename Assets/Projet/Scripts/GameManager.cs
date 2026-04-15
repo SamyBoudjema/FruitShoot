@@ -3,6 +3,7 @@ using UnityEngine.Events;
 
 public enum GameMode { Defouloir, Recette }
 public enum Difficulty { Facile, Moyen, Difficile }
+public enum WeaponType { Couteaux, SabreLaser }
 
 public class GameManager : MonoBehaviour
 {
@@ -12,6 +13,7 @@ public class GameManager : MonoBehaviour
     public float gameDuration = 300f; // 5 minutes
     public GameMode currentMode = GameMode.Defouloir;
     public Difficulty difficulty = Difficulty.Moyen;
+    public WeaponType weapon = WeaponType.Couteaux;
 
     [Header("State")]
     public float currentTime;
@@ -20,6 +22,13 @@ public class GameManager : MonoBehaviour
     public int bombsHit;
     public bool isPlaying;
 
+    [Header("Arcade Systems")]
+    public int currentStrikes = 0;
+    public int maxStrikes = 3;
+    public int currentComboCount = 0;
+    public float lastSliceTime = 0f;
+    public float comboTimerWindow = 1.2f; // Fenêtre large pour combo plus facile
+
     [Header("Audio")]
     [Tooltip("Musique jouée pendant la partie.")]
     public AudioClip backgroundMusic;
@@ -27,6 +36,8 @@ public class GameManager : MonoBehaviour
     public AudioClip gameStartSound;
     [Tooltip("Son joué lors de l'écran Game Over.")]
     public AudioClip gameOverSound;
+    [Tooltip("Son joué lorsqu'un combo est réalisé.")]
+    public AudioClip comboSound;
 
     private AudioSource bgmSource;
     private AudioSource sfxSource;
@@ -35,6 +46,8 @@ public class GameManager : MonoBehaviour
     public UnityEvent OnGameOver;
     public UnityEvent<int> OnScoreChanged;
     public UnityEvent<float> OnTimeChanged;
+    public UnityEvent<int, int> OnStrikeChanged; // current, max
+    public UnityEvent<int, float> OnComboTriggered; // fruits in combo, score multiplier
 
     [Header("Dev / Safety")]
     [Tooltip("If no MenuManager is present, auto-create one at runtime so the game can start via menu.")]
@@ -95,6 +108,28 @@ public class GameManager : MonoBehaviour
             if (currentTime <= 0)
             {
                 EndGame();
+            }
+
+            // Gestion de l'expiration du Combo
+            if (currentComboCount > 0 && Time.time - lastSliceTime > comboTimerWindow)
+            {
+                if (currentComboCount >= 3)
+                {
+                    float multiplier = 1f + (currentComboCount * 0.1f);
+                    OnComboTriggered?.Invoke(currentComboCount, multiplier);
+                    
+                    // Jouer le son de Combo
+                    if (comboSound != null && sfxSource != null)
+                    {
+                        sfxSource.PlayOneShot(comboSound);
+                    }
+                    
+                    // Donner un bonus de points final
+                    int bonus = Mathf.RoundToInt(currentComboCount * multiplier);
+                    score += bonus;
+                    OnScoreChanged?.Invoke(score);
+                }
+                currentComboCount = 0; // Reset
             }
         }
     }
@@ -159,8 +194,11 @@ public class GameManager : MonoBehaviour
         score = 0;
         fruitsSliced = 0;
         bombsHit = 0;
+        currentStrikes = 0;
+        currentComboCount = 0;
         OnScoreChanged?.Invoke(score);
         OnTimeChanged?.Invoke(currentTime);
+        OnStrikeChanged?.Invoke(currentStrikes, maxStrikes);
         // If Recette mode, reset recipe here
     }
 
@@ -200,27 +238,53 @@ public class GameManager : MonoBehaviour
     public void AddScore(int points)
     {
         if (!isPlaying) return;
-        score += points;
+        
+        // Multiplicateur actif si on est en train de combo
+        float multiplier = 1f;
+        if (currentComboCount >= 3) multiplier = 1f + (currentComboCount * 0.1f);
+        
+        score += Mathf.RoundToInt(points * multiplier);
         OnScoreChanged?.Invoke(score);
     }
 
-    public void AddTimePenalty(float penaltySeconds) // For bombs
+    public void AddTimePenalty(float penaltySeconds) // Gardé au cas où, mais non utilisé par défaut
     {
         if (!isPlaying) return;
         currentTime -= penaltySeconds;
-        if (currentTime <= 0)
-        {
-            EndGame();
-        }
+        if (currentTime <= 0) EndGame();
     }
 
     public void AddFruitSliced()
     {
-        if (isPlaying) fruitsSliced++;
+        if (!isPlaying) return;
+        
+        fruitsSliced++;
+        
+        if (Time.time - lastSliceTime <= comboTimerWindow)
+        {
+            currentComboCount++;
+        }
+        else
+        {
+            currentComboCount = 1;
+        }
+        
+        lastSliceTime = Time.time;
     }
 
     public void AddBombHit()
     {
-        if (isPlaying) bombsHit++;
+        if (!isPlaying) return;
+        
+        bombsHit++;
+        currentComboCount = 0; // Perte du combo
+        
+        currentStrikes++;
+        OnStrikeChanged?.Invoke(currentStrikes, maxStrikes);
+        
+        if (currentStrikes >= maxStrikes)
+        {
+            EndGame();
+        }
     }
 }

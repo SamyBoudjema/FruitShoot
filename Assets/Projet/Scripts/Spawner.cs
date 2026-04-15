@@ -60,49 +60,62 @@ public class Spawner : MonoBehaviour
         {
             var t = GetDifficulty01();
             var delayMult = GameManager.Instance != null ? GameManager.Instance.GetDifficultyDelayMultiplier() : 1f;
-            var minDelay = Mathf.Lerp(startMinSpawnDelay, endMinSpawnDelay, t) * delayMult;
-            var maxDelay = Mathf.Lerp(startMaxSpawnDelay, endMaxSpawnDelay, t) * delayMult;
+            
+            // Délai entre les vagues complètes (multiplié un peu pour compenser la quantité)
+            var minDelay = Mathf.Lerp(startMinSpawnDelay, endMinSpawnDelay, t) * delayMult * 2.0f;
+            var maxDelay = Mathf.Lerp(startMaxSpawnDelay, endMaxSpawnDelay, t) * delayMult * 2.5f;
             yield return new WaitForSeconds(Random.Range(minDelay, maxDelay));
 
             if (prefabsToSpawn.Count > 0)
             {
-                GameObject prefab = prefabsToSpawn[Random.Range(0, prefabsToSpawn.Count)];
-                
-                // Mode difficile : 35% de chance brute de forcer l'apparition d'une bombe si le jeu en possède une.
+                // Détermine la taille de la vague
+                int waveSize = Random.Range(2, 5);
                 if (GameManager.Instance != null && GameManager.Instance.difficulty == Difficulty.Difficile)
-                {
-                    if (Random.value < 0.35f)
-                    {
-                        var bombPrefab = prefabsToSpawn.Find(p => p.GetComponent<Bomb>() != null);
-                        if (bombPrefab != null) prefab = bombPrefab;
-                    }
-                }
-                
-                Vector3 spawnPos = transform.position + new Vector3(Random.Range(-0.5f, 0.5f), 0, Random.Range(-0.2f, 0.2f));
-                
-                GameObject spawned = Instantiate(prefab, spawnPos, Random.rotation);
-                
-                Rigidbody rb = spawned.GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    var forceMult = GameManager.Instance != null ? GameManager.Instance.GetDifficultyForceMultiplier() : 1f;
-                    var forceMin = Mathf.Lerp(startSpawnForceMin, endSpawnForceMin, t) * forceMult;
-                    var forceMax = Mathf.Lerp(startSpawnForceMax, endSpawnForceMax, t) * forceMult;
-                    float force = Random.Range(forceMin, forceMax);
-                    rb.AddForce(Vector3.up * force, ForceMode.Impulse);
-                    
-                    // On désactive la rotation automatique (Torque) pour que les fruits ne tournoient plus
-                    // rb.AddTorque(Random.insideUnitSphere * spawnTorqueMax, ForceMode.Impulse);
+                    waveSize = Random.Range(4, 7);
 
-                    // Ralentir la chute au début, puis accélérer progressivement.
-                    var dragMult = GameManager.Instance != null ? GameManager.Instance.GetDifficultyDragMultiplier() : 1f;
-                    rb.drag = Mathf.Max(0f, Mathf.Lerp(startDrag, endDrag, t) * dragMult);
+                // Crache tous les éléments de la vague très rapidement
+                for (int i = 0; i < waveSize; i++)
+                {
+                    SpawnSingleItem(t);
+                    yield return new WaitForSeconds(Random.Range(0.05f, 0.15f));
                 }
-
-                // Détruire l'objet après 3 secondes s'il n'a pas été coupé pour libérer la mémoire.
-                Destroy(spawned, 3f);
             }
         }
+    }
+
+    private void SpawnSingleItem(float t)
+    {
+        GameObject prefab = prefabsToSpawn[Random.Range(0, prefabsToSpawn.Count)];
+        
+        if (GameManager.Instance != null && GameManager.Instance.difficulty == Difficulty.Difficile)
+        {
+            if (Random.value < 0.30f) // 30% en hard par objet
+            {
+                var bombPrefab = prefabsToSpawn.Find(p => p.GetComponent<Bomb>() != null);
+                if (bombPrefab != null) prefab = bombPrefab;
+            }
+        }
+        
+        Vector3 spawnPos = transform.position + new Vector3(Random.Range(-0.8f, 0.8f), 0, Random.Range(-0.3f, 0.3f));
+        GameObject spawned = Instantiate(prefab, spawnPos, Random.rotation);
+        
+        Rigidbody rb = spawned.GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            var forceMult = GameManager.Instance != null ? GameManager.Instance.GetDifficultyForceMultiplier() : 1f;
+            var forceMin = Mathf.Lerp(startSpawnForceMin, endSpawnForceMin, t) * forceMult;
+            var forceMax = Mathf.Lerp(startSpawnForceMax, endSpawnForceMax, t) * forceMult;
+            float force = Random.Range(forceMin, forceMax);
+            
+            // Direction légèrement conique pour étaler la vague
+            Vector3 jumpDir = (Vector3.up + new Vector3(Random.Range(-0.2f, 0.2f), 0, Random.Range(-0.1f, 0.1f))).normalized;
+            rb.AddForce(jumpDir * force, ForceMode.Impulse);
+
+            var dragMult = GameManager.Instance != null ? GameManager.Instance.GetDifficultyDragMultiplier() : 1f;
+            rb.drag = Mathf.Max(0f, Mathf.Lerp(startDrag, endDrag, t) * dragMult);
+        }
+
+        Destroy(spawned, 4f); // 4 secondes au cas où
     }
 
     private float GetDifficulty01()

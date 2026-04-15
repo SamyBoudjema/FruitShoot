@@ -10,8 +10,7 @@ public class Bomb : MonoBehaviour
     {
         if (GameManager.Instance != null)
         {
-            GameManager.Instance.AddTimePenalty(timePenalty);
-            GameManager.Instance.AddBombHit();
+            GameManager.Instance.AddBombHit(); // S'occupe désormais des Strikes
         }
 
         if (explosionVFX != null)
@@ -85,7 +84,7 @@ public class Bomb : MonoBehaviour
             colTag.Contains("sol"))
         {
             hasTouchedGround = true;
-            Destroy(gameObject, 0.5f);
+            Destroy(gameObject); // Disparition instantanée
         }
     }
 }

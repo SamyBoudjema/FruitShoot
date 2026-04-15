@@ -60,7 +60,7 @@ public class FruitTarget : MonoBehaviour
             colTag.Contains("sol"))
         {
             hasTouchedGround = true;
-            Destroy(gameObject, 0.5f); // Délai de 0.5 seconde avant destruction
+            Destroy(gameObject); // Disparition instantanée
         }
     }
 

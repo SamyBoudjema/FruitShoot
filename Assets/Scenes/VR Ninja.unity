@@ -147,7 +147,7 @@ Transform:
   m_GameObject: {fileID: 11443539}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 2.78, y: 2.829, z: -35.41}
+  m_LocalPosition: {x: 4.07, y: 2.829, z: -35.41}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -342,9 +342,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   controllerNode: 5
-  laserRange: 100
-  laserDuration: 0.1
-  fakeSliceForce: 15
+  cooldown: 0.2
+  sabreLength: 3
+  sabreColor: {r: 0.2, g: 0.6, b: 1, a: 0.9}
+  sabreIgniteSound: {fileID: 8300000, guid: 1696ed87aadf737438cdd1fc63ab73de, type: 3}
+  sabreHumSound: {fileID: 8300000, guid: 5ccc08630f94b864b966a2430736f9fa, type: 3}
+  sabreSwingSound: {fileID: 8300000, guid: 6e79945888ed2bf4a8488920d87346f6, type: 3}
 --- !u!120 &244362828
 LineRenderer:
   serializedVersion: 2
@@ -941,6 +944,21 @@ PrefabInstance:
       propertyPath: m_Name
       value: wild west railway station with environment
       objectReference: {fileID: 0}
+    - target: {fileID: 8621202395451175241, guid: df6e0d5705c11244c8b08313c0fe392b,
+        type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -9.92
+      objectReference: {fileID: 0}
+    - target: {fileID: 8621202395451175241, guid: df6e0d5705c11244c8b08313c0fe392b,
+        type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 4.67
+      objectReference: {fileID: 0}
+    - target: {fileID: 8621202395451175241, guid: df6e0d5705c11244c8b08313c0fe392b,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -9.15
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects:
     - {fileID: 1513846833921841097, guid: df6e0d5705c11244c8b08313c0fe392b, type: 3}
@@ -1501,14 +1519,21 @@ MonoBehaviour:
   gameDuration: 300
   currentMode: 0
   difficulty: 1
+  weapon: 0
   currentTime: 0
   score: 0
   fruitsSliced: 0
   bombsHit: 0
   isPlaying: 0
+  currentStrikes: 0
+  maxStrikes: 3
+  currentComboCount: 0
+  lastSliceTime: 0
+  comboTimerWindow: 0.6
   backgroundMusic: {fileID: 8300000, guid: 460606cf8e618774295a9e1f8b2f050a, type: 3}
   gameStartSound: {fileID: 8300000, guid: 03b7dad08e5c6c4478f3c280e3e9d976, type: 3}
   gameOverSound: {fileID: 8300000, guid: 11505c49239442043a4a885b84486f75, type: 3}
+  comboSound: {fileID: 8300000, guid: d3a5ac36e6fd0b74898ce8ed153f40d1, type: 3}
   OnGameStart:
     m_PersistentCalls:
       m_Calls: []
@@ -1519,6 +1544,12 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   OnTimeChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  OnStrikeChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  OnComboTriggered:
     m_PersistentCalls:
       m_Calls: []
   autoCreateMenuManager: 1
