@@ -13,7 +13,8 @@ public class LaserShooter : MonoBehaviour
     public float cooldown = 0.05f;
 
     [Header("Sabre Laser Settings")]
-    public float sabreLength = 500.0f; // Très long pour atteindre tous les fruits
+    public float sabreLength = 2000.0f; // Longueur quasi infinie pour tout toucher
+    public float sabreWidth = 0.07f;    // Largeur du sabre (affinée pour look Pro)
     public Color sabreColor = new Color(0.2f, 0.6f, 1f, 0.9f);
     [Tooltip("Son d'activation du sabre (ignition).")]
     public AudioClip sabreIgniteSound;
@@ -27,13 +28,16 @@ public class LaserShooter : MonoBehaviour
     private GameObject crosshair;
 
     // Sabre Laser
-    private LineRenderer sabreLine;
+    private GameObject sabreVisual; // Conteneur
+    private Transform sabreMesh;    // Référence vers le cube visuel
     private GameObject sabreGlow;
     private bool sabreActive = false;
     private float sabreSliceCooldown = 0.15f; // Empêche multi-slice du même fruit
     private HashSet<int> recentlySlicedIds = new HashSet<int>();
     private float lastSliceClearTime;
 
+    public LayerMask sliceLayerMask = -1; // Masque par défaut pour tout trancher
+    
     // Audio sabre
     private AudioSource sabreSfxSource;
     private AudioSource sabreHumSource;
@@ -42,9 +46,14 @@ public class LaserShooter : MonoBehaviour
 
     void Awake()
     {
-        // Désactive l'ancien LineRenderer
+        // Désactive et configure l'ancien LineRenderer
         var lr = GetComponent<LineRenderer>();
-        if (lr != null) lr.enabled = false;
+        if (lr != null)
+        {
+            lr.enabled = false;
+            // On lui donne un matériau pour éviter le violet
+            lr.material = new Material(Shader.Find("Sprites/Default"));
+        }
 
         // Crée le crosshair (visible uniquement en mode Couteaux)
         crosshair = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -55,8 +64,8 @@ public class LaserShooter : MonoBehaviour
         rend.material = new Material(Shader.Find("Sprites/Default"));
         rend.material.color = new Color(0.2f, 1f, 0.2f, 0.85f);
 
-        // Prépare le LineRenderer pour le Sabre Laser
-        SetupSabreLine();
+        // Prépare le Visuel du Sabre Laser (Cylindre)
+        SetupSabreVisual();
     }
 
     void Start()
@@ -66,49 +75,55 @@ public class LaserShooter : MonoBehaviour
         if (lineVis != null) ((MonoBehaviour)lineVis).enabled = false;
 
         var lr = GetComponent<LineRenderer>();
-        if (lr != null && lr != sabreLine)
+        if (lr != null)
         {
             lr.enabled = false;
-            lr.positionCount = 0;
         }
     }
 
-    void SetupSabreLine()
+    void SetupSabreVisual()
     {
-        // Crée un nouveau GameObject dédié au sabre pour ne pas interférer avec le LineRenderer existant
-        var sabreObj = new GameObject("SabreLaserVisual");
-        sabreObj.transform.SetParent(transform);
-        sabreObj.transform.localPosition = Vector3.zero;
-        sabreObj.transform.localRotation = Quaternion.identity;
+        // Conteneur (Pivot à (0,0,0) au niveau de la main)
+        sabreVisual = new GameObject("SabreLaserContainer");
+        sabreVisual.transform.SetParent(transform);
+        sabreVisual.transform.localPosition = Vector3.zero;
+        sabreVisual.transform.localRotation = Quaternion.identity;
 
-        sabreLine = sabreObj.AddComponent<LineRenderer>();
-        sabreLine.positionCount = 2;
-        sabreLine.startWidth = 0.035f;
-        sabreLine.endWidth = 0.02f;
-        sabreLine.useWorldSpace = true;
-        sabreLine.material = new Material(Shader.Find("Sprites/Default"));
-        sabreLine.startColor = sabreColor;
-        sabreLine.endColor = new Color(sabreColor.r, sabreColor.g, sabreColor.b, 0.4f);
-        sabreLine.enabled = false;
+        // Le Cube est plus simple que le Cylindre car Scale 1 = 1 mètre.
+        GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cube.name = "SabreMesh";
+        Destroy(cube.GetComponent<Collider>());
+        sabreMesh = cube.transform;
+        sabreMesh.SetParent(sabreVisual.transform);
+        
+        // On règle le pivot pour que le cube s'étende vers l'avant sur Z.
+        // Un cube de scale 1 s'étend de -0.5 à 0.5. 
+        // On le décale de +0.5 pour que sa base commence à 0.
+        sabreMesh.localPosition = new Vector3(0, 0, 0.5f);
+        sabreMesh.localRotation = Quaternion.identity;
+        sabreMesh.localScale = new Vector3(sabreWidth, sabreWidth, 1f);
 
-        // Boule lumineuse au bout du sabre
+        var rend = cube.GetComponent<MeshRenderer>();
+        rend.material = new Material(Shader.Find("Sprites/Default"));
+        rend.material.color = sabreColor;
+        
+        sabreVisual.SetActive(false);
+
+        // Boule lumineuse
         sabreGlow = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         sabreGlow.name = "SabreGlow";
         Destroy(sabreGlow.GetComponent<Collider>());
-        sabreGlow.transform.localScale = Vector3.one * 0.06f;
+        sabreGlow.transform.localScale = Vector3.one * (sabreWidth * 1.5f);
         var glowRend = sabreGlow.GetComponent<MeshRenderer>();
         glowRend.material = new Material(Shader.Find("Sprites/Default"));
-        glowRend.material.color = new Color(sabreColor.r, sabreColor.g, sabreColor.b, 0.7f);
+        glowRend.material.color = new Color(sabreColor.r, sabreColor.g, sabreColor.b, 0.8f);
         sabreGlow.SetActive(false);
 
-        // Sources audio pour le sabre
+        // Sources audio
         sabreSfxSource = gameObject.AddComponent<AudioSource>();
         sabreSfxSource.playOnAwake = false;
-        sabreSfxSource.loop = false;
         sabreSfxSource.volume = 0.7f;
-
         sabreHumSource = gameObject.AddComponent<AudioSource>();
-        sabreHumSource.playOnAwake = false;
         sabreHumSource.loop = true;
         sabreHumSource.volume = 0.35f;
     }
@@ -124,13 +139,24 @@ public class LaserShooter : MonoBehaviour
         var weapon = GetCurrentWeapon();
 
         // Gère la visibilité du crosshair selon l'arme
-        if (crosshair != null) crosshair.SetActive(weapon == WeaponType.Couteaux);
+        if (crosshair != null) 
+        {
+            bool shouldBeVisible = (weapon == WeaponType.Couteaux && GameManager.Instance != null && GameManager.Instance.isPlaying);
+            crosshair.SetActive(shouldBeVisible);
+        }
 
         InputDevice device = InputDevices.GetDeviceAtXRNode(controllerNode);
         if (!device.isValid) return;
 
         if (!device.TryGetFeatureValue(CommonUsages.triggerButton, out bool triggerValue))
             return;
+
+        // --- NOUVEAU : Si on n'est pas en train de jouer, on désactive le sabre et on arrête là ---
+        if (GameManager.Instance != null && !GameManager.Instance.isPlaying)
+        {
+            SetSabreActive(false);
+            return;
+        }
 
         if (weapon == WeaponType.Couteaux)
         {
@@ -242,16 +268,62 @@ public class LaserShooter : MonoBehaviour
         {
             SetSabreActive(true);
 
-            // Rayon continu qui coupe tout sur son passage
-            Vector3 origin = transform.position;
-            Vector3 tip = origin + transform.forward * sabreLength;
+            // ===== SOLUTION RADICALE : LINE RENDERER EN WORLD SPACE =====
+            // Le LineRenderer en World Space garantit 2000m réels 
+            // peu importe les échelles du contrôleur parent (souvent < 1 en VR).
+            var lr = GetComponent<LineRenderer>();
+            if (lr != null)
+            {
+                lr.enabled = true;
+                lr.useWorldSpace = true;
+                lr.startWidth = sabreWidth;
+                lr.endWidth = sabreWidth;
+                lr.startColor = sabreColor;
+                lr.endColor = sabreColor;
+                lr.positionCount = 2;
+                lr.SetPosition(0, transform.position);
+                lr.SetPosition(1, transform.position + transform.forward * 2000.0f);
+            }
 
-            sabreLine.SetPosition(0, origin);
-            sabreLine.SetPosition(1, tip);
+            // On désactive l'ancien Cube qui ne marchait pas à cause des échelles parent
+            if (sabreVisual != null) sabreVisual.SetActive(false);
+
+            // --- FIX TRANCHAGE : On recule l'origine et on force le mask ---
+            Vector3 origin = transform.position - transform.forward * 0.25f;
+            Vector3 direction = transform.forward;
+            
+            // Si le masque est vide (0), on force sur "Tout" (-1) pour être sûr de toucher les fruits
+            int finalMask = (sliceLayerMask.value == 0) ? -1 : sliceLayerMask.value;
+
+            // === DÉTECTION ET TRANCHAGE ===
+            RaycastHit[] sliceHits = Physics.SphereCastAll(origin, 0.25f, direction, 2000.0f, finalMask);
+            
+            foreach (var hit in sliceHits)
+            {
+                int id = hit.collider.gameObject.GetInstanceID();
+                if (recentlySlicedIds.Contains(id)) continue;
+
+                FruitTarget fruit = hit.collider.GetComponent<FruitTarget>();
+                if (fruit != null)
+                {
+                    fruit.Slice(direction, hit.point, direction * 10f);
+                    recentlySlicedIds.Add(id);
+                    continue;
+                }
+
+                Bomb bomb = hit.collider.GetComponent<Bomb>();
+                if (bomb != null)
+                {
+                    bomb.Slice();
+                    recentlySlicedIds.Add(id);
+                }
+            }
 
             if (sabreGlow != null)
             {
-                sabreGlow.transform.position = tip;
+                // On affiche la boule à 20m
+                sabreGlow.transform.position = origin + direction * 20f;
+                sabreGlow.transform.localScale = Vector3.one * (sabreWidth * 2.5f);
             }
 
             // === SON DE MOUVEMENT ===
@@ -281,28 +353,6 @@ public class LaserShooter : MonoBehaviour
                 recentlySlicedIds.Clear();
                 lastSliceClearTime = Time.time;
             }
-
-            // Détection par SphereCast le long du sabre
-            RaycastHit[] hits = Physics.SphereCastAll(origin, 0.15f, transform.forward, sabreLength);
-            foreach (var hit in hits)
-            {
-                int id = hit.collider.gameObject.GetInstanceID();
-                if (recentlySlicedIds.Contains(id)) continue;
-
-                FruitTarget fruit = hit.collider.GetComponent<FruitTarget>();
-                if (fruit != null)
-                {
-                    fruit.Slice(transform.forward, hit.point, transform.forward * 10f);
-                    recentlySlicedIds.Add(id);
-                }
-
-                Bomb bomb = hit.collider.GetComponent<Bomb>();
-                if (bomb != null)
-                {
-                    bomb.Slice();
-                    recentlySlicedIds.Add(id);
-                }
-            }
         }
         else
         {
@@ -315,8 +365,12 @@ public class LaserShooter : MonoBehaviour
         if (sabreActive == active) return;
         sabreActive = active;
 
-        if (sabreLine != null) sabreLine.enabled = active;
+        if (sabreVisual != null) sabreVisual.SetActive(active);
         if (sabreGlow != null) sabreGlow.SetActive(active);
+
+        // NOUVEAU : On active/désactive le composant LineRenderer (le trait infini)
+        var lr = GetComponent<LineRenderer>();
+        if (lr != null) lr.enabled = active;
 
         if (active)
         {

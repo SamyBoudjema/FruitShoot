@@ -121,4 +121,4 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   timePenalty: 10
   explosionVFX: {fileID: 0}
-  explosionSound: {fileID: 8300000, guid: 128fa0b98ccef0342ad938b89ea1c33d, type: 3}
+  explosionSound: {fileID: 8300000, guid: d43b91c562239b4489c83017b6992658, type: 3}

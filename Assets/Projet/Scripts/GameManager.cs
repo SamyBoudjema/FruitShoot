@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.XR;
+using UnityEngine.InputSystem;
 
 public enum GameMode { Defouloir, Recette }
 public enum Difficulty { Facile, Moyen, Difficile }
@@ -32,15 +34,22 @@ public class GameManager : MonoBehaviour
     [Header("Audio")]
     [Tooltip("Musique jouée pendant la partie.")]
     public AudioClip backgroundMusic;
+    [Tooltip("Musique joue dans le menu.")]
+    public AudioClip menuMusic;
     [Tooltip("Son court joué au lancement de la partie.")]
     public AudioClip gameStartSound;
     [Tooltip("Son joué lors de l'écran Game Over.")]
     public AudioClip gameOverSound;
     [Tooltip("Son joué lorsqu'un combo est réalisé.")]
     public AudioClip comboSound;
+    [Tooltip("Son 'tic-tac' joué quand le temps presse.")]
+    public AudioClip timerTickSound;
+    [Tooltip("Son joué quand le temps est écoulé.")]
+    public AudioClip timerUpSound;
 
     private AudioSource bgmSource;
     private AudioSource sfxSource;
+    private float lastTickPlayedTime = 11f;
 
     public UnityEvent OnGameStart;
     public UnityEvent OnGameOver;
@@ -48,6 +57,9 @@ public class GameManager : MonoBehaviour
     public UnityEvent<float> OnTimeChanged;
     public UnityEvent<int, int> OnStrikeChanged; // current, max
     public UnityEvent<int, float> OnComboTriggered; // fruits in combo, score multiplier
+    public UnityEvent<string> OnRecipeStringUpdated; // Liste des fruits à couper
+
+    private System.Collections.Generic.Dictionary<string, int> currentRecipe = new System.Collections.Generic.Dictionary<string, int>();
 
     [Header("Dev / Safety")]
     [Tooltip("If no MenuManager is present, auto-create one at runtime so the game can start via menu.")]
@@ -85,8 +97,15 @@ public class GameManager : MonoBehaviour
 
     private void Start()
     {
-        // On ne démarre plus la partie automatiquement. Le MenuManager va s'en charger !
+        // On ne dmarre plus la partie automatiquement. Le MenuManager va s'en charger !
         ResetGame();
+
+        // Jouer la musique du menu au dmarrage
+        if (menuMusic != null && bgmSource != null)
+        {
+            bgmSource.clip = menuMusic;
+            bgmSource.Play();
+        }
 
         EnsureMenuManagerExists();
 
@@ -109,6 +128,10 @@ public class GameManager : MonoBehaviour
             {
                 EndGame();
             }
+            else
+            {
+                HandleTimerSounds();
+            }
 
             // Gestion de l'expiration du Combo
             if (currentComboCount > 0 && Time.time - lastSliceTime > comboTimerWindow)
@@ -130,6 +153,49 @@ public class GameManager : MonoBehaviour
                     OnScoreChanged?.Invoke(score);
                 }
                 currentComboCount = 0; // Reset
+            }
+        }
+
+        HandleMenuInput();
+    }
+
+    private void HandleMenuInput()
+    {
+        bool menuPressed = false;
+
+        // Clavier (New Input System)
+        if (Keyboard.current != null && Keyboard.current[Key.M].wasPressedThisFrame) menuPressed = true;
+
+        // VR Controllers (Primary Button ou Menu Button)
+        UnityEngine.XR.InputDevice leftHand = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.LeftHand);
+        if (leftHand.isValid && (leftHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool lb) && lb)) menuPressed = true;
+        
+        UnityEngine.XR.InputDevice rightHand = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.RightHand);
+        if (rightHand.isValid && (rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool rb) && rb)) menuPressed = true;
+
+        if (menuPressed)
+        {
+            var mm = FindFirstObjectByType<MenuManager>();
+            if (mm != null)
+            {
+                EndGame();
+                mm.ShowMainMenu();
+            }
+        }
+    }
+
+    private void HandleTimerSounds()
+    {
+        if (currentTime <= 10.1f && currentTime > 0)
+        {
+            // Joue un son toutes les secondes environ
+            if (Mathf.FloorToInt(currentTime) != Mathf.FloorToInt(lastTickPlayedTime))
+            {
+                if (timerTickSound != null && sfxSource != null)
+                {
+                    sfxSource.PlayOneShot(timerTickSound);
+                }
+                lastTickPlayedTime = currentTime;
             }
         }
     }
@@ -162,6 +228,16 @@ public class GameManager : MonoBehaviour
             sfxSource.PlayOneShot(gameStartSound);
         }
 
+        if (currentMode == GameMode.Recette)
+        {
+            GenerateRandomRecipe();
+        }
+
+        if (bgmSource != null && bgmSource.isPlaying)
+        {
+            bgmSource.Stop();
+        }
+
         if (backgroundMusic != null && bgmSource != null)
         {
             bgmSource.clip = backgroundMusic;
@@ -181,9 +257,21 @@ public class GameManager : MonoBehaviour
             bgmSource.Stop();
         }
 
+        // Retour  la musique du menu
+        if (menuMusic != null && bgmSource != null)
+        {
+            bgmSource.clip = menuMusic;
+            bgmSource.Play();
+        }
+
         if (gameOverSound != null && sfxSource != null)
         {
             sfxSource.PlayOneShot(gameOverSound);
+        }
+
+        if (timerUpSound != null && sfxSource != null)
+        {
+            sfxSource.PlayOneShot(timerUpSound);
         }
     }
 
@@ -196,6 +284,7 @@ public class GameManager : MonoBehaviour
         bombsHit = 0;
         currentStrikes = 0;
         currentComboCount = 0;
+        lastTickPlayedTime = 11f;
         OnScoreChanged?.Invoke(score);
         OnTimeChanged?.Invoke(currentTime);
         OnStrikeChanged?.Invoke(currentStrikes, maxStrikes);
@@ -272,6 +361,78 @@ public class GameManager : MonoBehaviour
         lastSliceTime = Time.time;
     }
 
+    public void GenerateRandomRecipe()
+    {
+        currentRecipe.Clear();
+        string[] allFruits = { "Pomme", "Citron", "Orange", "Kiwi", "Fraise" };
+        
+        // Choisir 2 ou 3 types de fruits au hasard
+        int typesCount = Random.Range(2, 4);
+        System.Collections.Generic.List<string> selectedTypes = new System.Collections.Generic.List<string>();
+        
+        while (selectedTypes.Count < typesCount)
+        {
+            string f = allFruits[Random.Range(0, allFruits.Length)];
+            if (!selectedTypes.Contains(f)) selectedTypes.Add(f);
+        }
+
+        foreach (string fruit in selectedTypes)
+        {
+            currentRecipe[fruit] = Random.Range(2, 5); // Entre 2 et 4 de chaque
+        }
+
+        UpdateRecipeString();
+    }
+
+    private void UpdateRecipeString()
+    {
+        if (currentRecipe.Count == 0)
+        {
+            OnRecipeStringUpdated?.Invoke("Recette terminee !");
+            return;
+        }
+
+        string s = "";
+        foreach (var kvp in currentRecipe)
+        {
+            s += $"{kvp.Value} {kvp.Key}(s), ";
+        }
+        OnRecipeStringUpdated?.Invoke(s.TrimEnd(',', ' '));
+    }
+
+    public void ProcessFruitSlice(string fruitName)
+    {
+        if (!isPlaying) return;
+
+        // On appelle la logique de combo de base
+        AddFruitSliced();
+
+        if (currentMode == GameMode.Recette)
+        {
+            if (currentRecipe.ContainsKey(fruitName))
+            {
+                // Succes : Fruit dans la commande
+                currentRecipe[fruitName]--;
+                if (currentRecipe[fruitName] <= 0) currentRecipe.Remove(fruitName);
+                
+                AddScore(15); // Petit bonus pour le bon fruit
+                UpdateRecipeString();
+
+                // Si tout est fini, on regenere une petite suite
+                if (currentRecipe.Count == 0) GenerateRandomRecipe();
+            }
+            else
+            {
+                // Erreur : Mauvais fruit ! -> Strike (XXX)
+                AddBombHit(); // On reutilise AddBombHit car elle gere les strikes et le game over
+            }
+        }
+        else
+        {
+            // Mode Defouloir : Juste des points et combo
+            AddScore(10);
+        }
+    }
     public void AddBombHit()
     {
         if (!isPlaying) return;

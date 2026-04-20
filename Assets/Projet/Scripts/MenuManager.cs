@@ -17,7 +17,16 @@ public class MenuManager : MonoBehaviour
     public Difficulty defouloirDifficulty = Difficulty.Moyen;
 
     private GameMode selectedMode = GameMode.Defouloir;
-    private GameObject defouloirOptionsGroup;
+    
+    // Conteneurs pour les sous-menus
+    private GameObject groupModeSelection;
+    private GameObject groupConfig;
+
+    // Lignes d'options (pour les masquer/afficher)
+    private GameObject rowDuration;
+    private GameObject rowDifficulty;
+    private GameObject rowWeapon;
+
     private Button btnSelectDefouloir;
     private Button btnSelectRecette;
 
@@ -51,32 +60,43 @@ public class MenuManager : MonoBehaviour
         if (gameUIPanel != null) gameUIPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
 
+        ShowModeSelection(); // On revient toujours au choix du mode au dbut
         TeleportPlayerInFrontOfMenu();
     }
 
-    public void SelectMode(GameMode mode)
+    public void ShowModeSelection()
     {
-        selectedMode = mode;
-        if (defouloirOptionsGroup != null)
-        {
-            defouloirOptionsGroup.SetActive(selectedMode == GameMode.Defouloir);
-        }
-        
-        SetButtonSelected(btnSelectDefouloir, selectedMode == GameMode.Defouloir);
-        SetButtonSelected(btnSelectRecette, selectedMode == GameMode.Recette);
+        if (groupModeSelection != null) groupModeSelection.SetActive(true);
+        if (groupConfig != null) groupConfig.SetActive(false);
     }
 
-    public void StartSelectedMode()
+    public void ShowModeConfig(GameMode mode)
     {
+        selectedMode = mode;
+        if (groupModeSelection != null) groupModeSelection.SetActive(false);
+        if (groupConfig != null) groupConfig.SetActive(true);
+
+        // On masque/affiche les lignes selon le mode
+        bool isDefouloir = (mode == GameMode.Defouloir);
+        if (rowDuration != null) rowDuration.SetActive(isDefouloir);
+        if (rowDifficulty != null) rowDifficulty.SetActive(isDefouloir);
+        if (rowWeapon != null) rowWeapon.SetActive(true); // L'arme est toujours là
+
+        // On ajuste le titre de la config
+        var title = groupConfig.transform.Find("ConfigTitle")?.GetComponent<TextMeshProUGUI>();
+        if (title != null) title.text = isDefouloir ? "CONFIGURATION DÉFOULOIR" : "CONFIGURATION RECETTE";
+    }
+
+    public void StartMode()
+    {
+        // On lance le mode qui a été sélectionné précédemment
         if (GameManager.Instance != null)
         {
             GameManager.Instance.currentMode = selectedMode;
-            if (selectedMode == GameMode.Defouloir)
-            {
-                GameManager.Instance.gameDuration = Mathf.Clamp(defouloirDurationMinutes, 1f, 20f) * 60f;
-                GameManager.Instance.difficulty = defouloirDifficulty;
-                GameManager.Instance.weapon = selectedWeapon;
-            }
+            GameManager.Instance.gameDuration = Mathf.Clamp(defouloirDurationMinutes, 1f, 20f) * 60f;
+            GameManager.Instance.difficulty = defouloirDifficulty;
+            GameManager.Instance.weapon = selectedWeapon;
+            
             GameManager.Instance.StartGame();
         }
         RefreshGameUiForMode();
@@ -87,18 +107,33 @@ public class MenuManager : MonoBehaviour
     {
         if (mainMenuPanel != null) mainMenuPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
+
+        // On s'assure d'avoir bien raccordé le HUD avant de l'afficher
+        AutoWirePanelsIfNeeded();
+
         if (gameUIPanel != null) 
         {
             gameUIPanel.SetActive(true);
+            gameUIPanel.layer = LayerMask.NameToLayer("UI");
             
-            // Snap HUD to a fixed position like a banner on a wall
+            // On s'assure que le Canvas est bien en WorldSpace pour être positionné
+            var canvas = gameUIPanel.GetComponent<Canvas>();
+            if (canvas != null) 
+            {
+                canvas.renderMode = RenderMode.WorldSpace;
+            }
+
+            // Snap HUD to a fixed position in front of the player
             var cam = Camera.main;
             if (cam != null)
             {
                 var fwd = GetFlattenedForward(cam);
-                // Placed further away and higher up
-                gameUIPanel.transform.position = cam.transform.position + fwd * 6.5f + Vector3.up * 2.8f;
+                // Position plus haute dans le ciel (3.2m de hauteur)
+                gameUIPanel.transform.position = cam.transform.position + fwd * 6.5f + Vector3.up * 3.2f;
                 gameUIPanel.transform.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+                
+                // On force une échelle correcte pour que ce soit visible !
+                gameUIPanel.transform.localScale = Vector3.one * 0.007f;
             }
         }
     }
@@ -131,9 +166,9 @@ public class MenuManager : MonoBehaviour
     private void RefreshGameOverStats()
     {
         if (GameManager.Instance == null) return;
-        if (goScoreText != null) goScoreText.text = $"Score Final : {GameManager.Instance.score}";
-        if (goFruitsText != null) goFruitsText.text = $"Fruits Découpés : {GameManager.Instance.fruitsSliced}";
-        if (goBombsText != null) goBombsText.text = $"Bombes Touchées : {GameManager.Instance.bombsHit}";
+        if (goScoreText != null) goScoreText.text = $"SCORE FINAL : {GameManager.Instance.score}";
+        if (goFruitsText != null) goFruitsText.text = $"FRUITS TRANCHÉS : {GameManager.Instance.fruitsSliced}";
+        // goBombsText n'est plus utilisé
     }
 
     private GameObject CreateGameOverCanvas()
@@ -162,30 +197,36 @@ public class MenuManager : MonoBehaviour
         panelGo.layer = canvasGo.layer;
         panelGo.transform.SetParent(canvasGo.transform, false);
         var panelImage = panelGo.AddComponent<Image>();
-        panelImage.color = new Color(0, 0, 0, 0.85f);
+        panelImage.color = new Color(0.18f, 0.18f, 0.18f, 1f); // Gris anthracite moderne
         var panelRect = panelGo.GetComponent<RectTransform>();
         panelRect.anchorMin = Vector2.zero; panelRect.anchorMax = Vector2.one;
         panelRect.offsetMin = Vector2.zero; panelRect.offsetMax = Vector2.zero;
 
-        var title = CreateLabel(panelGo.transform, "FIN DE PARTIE", 75);
-        title.color = new Color(1f, 0.4f, 0.4f);
-        title.rectTransform.anchoredPosition = new Vector2(0, 250);
+        // BORDURES FINES
+        CreateAccentBar(panelGo.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -2), 2f, new Color(1f, 1f, 1f, 0.15f));
+        CreateAccentBar(panelGo.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 2), 2f, new Color(1f, 1f, 1f, 0.15f));
 
-        goScoreText = CreateLabel(panelGo.transform, "Score Final : 0", 50);
-        goScoreText.color = new Color(0f, 0.8f, 1f);
-        goScoreText.rectTransform.anchoredPosition = new Vector2(0, 100);
+        var title = CreateLabel(panelGo.transform, "PARTIE TERMINÉE", 75);
+        title.color = Color.white;
+        title.fontStyle = FontStyles.Bold;
+        title.rectTransform.anchoredPosition = new Vector2(0, 240);
 
-        goFruitsText = CreateLabel(panelGo.transform, "Fruits Découpés : 0", 40);
-        goFruitsText.rectTransform.anchoredPosition = new Vector2(0, 0);
+        var perfLabel = CreateLabel(panelGo.transform, "-- PERFORMANCE --", 25);
+        perfLabel.color = new Color(1f, 1f, 1f, 0.3f);
+        perfLabel.rectTransform.anchoredPosition = new Vector2(0, 160);
 
-        goBombsText = CreateLabel(panelGo.transform, "Bombes Touchées : 0", 40);
-        goBombsText.color = new Color(1f, 0.5f, 0f);
-        goBombsText.rectTransform.anchoredPosition = new Vector2(0, -80);
+        goScoreText = CreateLabel(panelGo.transform, "SCORE FINAL : 0", 60);
+        goScoreText.color = Color.white;
+        goScoreText.rectTransform.anchoredPosition = new Vector2(0, 70);
 
-        var btnReturn = CreateButton(panelGo.transform, "Bouton_Retour", "Retour au Menu");
-        btnReturn.GetComponent<Image>().color = new Color(0.8f, 0.2f, 0.2f, 0.5f);
+        goFruitsText = CreateLabel(panelGo.transform, "FRUITS TRANCHÉS : 0", 45);
+        goFruitsText.color = new Color(0.8f, 0.8f, 0.85f);
+        goFruitsText.rectTransform.anchoredPosition = new Vector2(0, -30);
+
+        var btnReturn = CreateButton(panelGo.transform, "Bouton_Retour", "RETOUR AU MENU");
+        btnReturn.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.08f);
         var rtBtn = btnReturn.GetComponent<RectTransform>();
-        rtBtn.sizeDelta = new Vector2(450, 90);
+        rtBtn.sizeDelta = new Vector2(480, 100);
         rtBtn.anchoredPosition = new Vector2(0, -220);
         btnReturn.onClick.AddListener(ShowMainMenu);
 
@@ -194,12 +235,89 @@ public class MenuManager : MonoBehaviour
 
     private void AutoWirePanelsIfNeeded()
     {
-        // If scene already has a HUD canvas (RecipeUI), treat it as the in-game UI panel.
         if (gameUIPanel == null)
         {
-            var recipeUi = FindFirstObjectByType<RecipeUI>();
-            if (recipeUi != null) gameUIPanel = recipeUi.gameObject;
+            var recipeUi = FindFirstObjectByType<RecipeUI>(FindObjectsInactive.Include);
+            if (recipeUi != null) 
+            {
+                gameUIPanel = recipeUi.gameObject;
+                Debug.Log("HUD existant trouvé.");
+            }
+            else
+            {
+                // CAS CRITIQUE : Le HUD a disparu de la scène, on le recrée proprement
+                Debug.LogWarning("HUD introuvable. Création d'un nouveau HUD de secours...");
+                gameUIPanel = CreateGameplayHUD();
+            }
         }
+    }
+
+    private GameObject CreateGameplayHUD()
+    {
+        var hudGo = new GameObject("Gameplay_HUD");
+        hudGo.layer = LayerMask.NameToLayer("UI");
+        
+        var canvas = hudGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        hudGo.AddComponent<CanvasScaler>();
+        hudGo.AddComponent<GraphicRaycaster>();
+
+        var rt = hudGo.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(1400, 200);
+        rt.localScale = Vector3.one * 0.007f;
+
+        var recipeUiComp = hudGo.AddComponent<RecipeUI>();
+
+        // Création des 3 textes principaux
+        recipeUiComp.scoreText = CreateLabel(hudGo.transform, "Score: 0", 45);
+        recipeUiComp.timerText = CreateLabel(hudGo.transform, "00:00", 45);
+        recipeUiComp.recipeText = CreateLabel(hudGo.transform, "Commande", 32);
+
+        // AJOUT DES ÉLÉMENTS ARCADE (Croix et Combos)
+        var stGo = new GameObject("StrikesText");
+        stGo.transform.SetParent(hudGo.transform, false);
+        var strikesTmp = stGo.AddComponent<TextMeshProUGUI>();
+        strikesTmp.fontSize = 60; strikesTmp.alignment = TextAlignmentOptions.Center;
+        strikesTmp.rectTransform.anchoredPosition = new Vector2(0, -90);
+        strikesTmp.text = "";
+        // On utilise l'accès privé via reflection ou on modifie RecipeUI (on va supposer qu'on peut assigner via un champ sérialisé si on l'ajoute ou par nom)
+        // Mais comme on a les références dans RecipeUI publiques, on va les utiliser.
+        // Wait, RecipeUI.cs showed they are private/public?
+        // scoreText, timerText, recipeText are public. strikesText, comboText are PRIVATE.
+        
+        // On va rendre strikesText et comboText publics dans RecipeUI.cs dans l'étape suivante, 
+        // mais pour l'instant on va les créer et laisser RecipeUI les trouver par nom ou on les injecte.
+        stGo.name = "StrikesText";
+        
+        var ctGo = new GameObject("ComboText");
+        ctGo.transform.SetParent(hudGo.transform, false);
+        var comboTmp = ctGo.AddComponent<TextMeshProUGUI>();
+        comboTmp.fontSize = 55; comboTmp.alignment = TextAlignmentOptions.Center;
+        comboTmp.fontStyle = FontStyles.Bold | FontStyles.Italic;
+        comboTmp.color = new Color(1f, 0.85f, 0.1f); // Gold/Yellow Premium
+        
+        // --- FIX : On élargit la zone pour éviter le retour à la ligne ---
+        comboTmp.rectTransform.sizeDelta = new Vector2(1200, 200); 
+        comboTmp.enableWordWrapping = false;
+        
+        comboTmp.rectTransform.anchoredPosition = new Vector2(0, 110); // Plus haut pour ne pas gêner
+        comboTmp.text = "";
+        ctGo.name = "ComboText";
+        ctGo.SetActive(false);
+
+        // On raccorde les références
+        recipeUiComp.strikesText = strikesTmp;
+        recipeUiComp.comboText = comboTmp;
+
+        // INITIALISATION DES CROIX (XXX) - On utilise la logique de RecipeUI
+        strikesTmp.text = "<color=#555555>X </color><color=#555555>X </color><color=#555555>X </color>";
+
+        // Positionnement (ApplyHudLayout() de RecipeUI s'en chargera aussi au Start)
+        recipeUiComp.scoreText.rectTransform.anchoredPosition = new Vector2(-450, 0);
+        recipeUiComp.timerText.rectTransform.anchoredPosition = new Vector2(450, 0);
+        recipeUiComp.recipeText.rectTransform.anchoredPosition = new Vector2(0, 0);
+
+        return hudGo;
     }
 
     private void EnsureMenuUIExists()
@@ -285,45 +403,159 @@ public class MenuManager : MonoBehaviour
         panelGo.layer = canvasGo.layer;
         panelGo.transform.SetParent(canvasGo.transform, false);
         var panelImage = panelGo.AddComponent<Image>();
-        panelImage.color = new Color(0.05f, 0.05f, 0.12f, 0.92f); // Bleu très sombre quasi opaque
+        panelImage.color = new Color(0.18f, 0.18f, 0.18f, 1f); // Fond gris anthracite
         var panelRect = panelGo.GetComponent<RectTransform>();
         panelRect.anchorMin = Vector2.zero;
         panelRect.anchorMax = Vector2.one;
         panelRect.offsetMin = Vector2.zero;
         panelRect.offsetMax = Vector2.zero;
 
-        // ===== BORDURE HAUT (accent cyan) =====
-        CreateAccentBar(panelGo.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -4), 6f, new Color(0f, 0.85f, 1f, 0.7f));
-        // ===== BORDURE BAS (accent cyan) =====
-        CreateAccentBar(panelGo.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 4), 6f, new Color(0f, 0.85f, 1f, 0.7f));
+        // BORDURES FINES ET DISCRETES
+        CreateAccentBar(panelGo.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -2), 2f, new Color(1f, 1f, 1f, 0.15f));
+        CreateAccentBar(panelGo.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 2), 2f, new Color(1f, 1f, 1f, 0.15f));
 
         CreateTitle(panelGo.transform);
 
-        // ===== SÉPARATEUR SOUS LE TITRE =====
-        CreateAccentBar(panelGo.transform, new Vector2(0.1f, 1f), new Vector2(0.9f, 1f), new Vector2(0, -140), 3f, new Color(1f, 1f, 1f, 0.15f));
+        // SÉPARATEUR MINIMALISTE
+        CreateAccentBar(panelGo.transform, new Vector2(0.2f, 1f), new Vector2(0.8f, 1f), new Vector2(0, -130), 1f, new Color(1f, 1f, 1f, 0.1f));
 
-        defouloirOptionsGroup = CreateDefouloirOptions(panelGo.transform);
+        // --- GROUPE 1 : SÉLECTION DU MODE ---
+        groupModeSelection = new GameObject("Group_ModeSelection");
+        groupModeSelection.layer = canvasGo.layer;
+        groupModeSelection.transform.SetParent(panelGo.transform, false);
+        var rtSel = groupModeSelection.AddComponent<RectTransform>();
+        rtSel.anchorMin = Vector2.zero; rtSel.anchorMax = Vector2.one;
+        rtSel.offsetMin = Vector2.zero; rtSel.offsetMax = Vector2.zero;
 
-        // Mode Selection Buttons
-        btnSelectDefouloir = CreateStyledModeButton(panelGo.transform, "Bouton_Select_Defouloir", "DEFOULOIR", new Color(1f, 0.4f, 0.2f, 0.35f));
-        btnSelectDefouloir.onClick.AddListener(() => SelectMode(GameMode.Defouloir));
-        
-        btnSelectRecette = CreateStyledModeButton(panelGo.transform, "Bouton_Select_Recette", "RECETTE", new Color(0.2f, 0.7f, 1f, 0.35f));
-        btnSelectRecette.onClick.AddListener(() => SelectMode(GameMode.Recette));
+        var subTitle = CreateLabel(groupModeSelection.transform, "CHOISISSEZ VOTRE MODE DE JEU", 30);
+        subTitle.color = new Color(1f, 1f, 1f, 0.4f);
+        subTitle.rectTransform.anchoredPosition = new Vector2(0, 100);
 
-        // Play Button
-        var btnPlay = CreateButton(panelGo.transform, "Bouton_Jouer", "JOUER");
-        btnPlay.GetComponent<Image>().color = new Color(0f, 0.7f, 0.3f, 0.5f);
-        var playText = btnPlay.GetComponentInChildren<TextMeshProUGUI>();
-        if (playText != null) { playText.fontSize = 52; playText.color = new Color(0.7f, 1f, 0.7f); }
-        btnPlay.onClick.AddListener(StartSelectedMode);
+        btnSelectDefouloir = CreateStyledModeButton(groupModeSelection.transform, "Btn_GoTo_Defouloir", "DÉFOULOIR", new Color(1f, 1f, 1f, 0.08f));
+        btnSelectDefouloir.onClick.AddListener(() => ShowModeConfig(GameMode.Defouloir));
+        var rtDef = btnSelectDefouloir.GetComponent<RectTransform>();
+        rtDef.sizeDelta = new Vector2(450, 140);
+        rtDef.anchoredPosition = new Vector2(0, 0);
 
-        PositionButtons(btnSelectDefouloir.GetComponent<RectTransform>(), btnSelectRecette.GetComponent<RectTransform>(), btnPlay.GetComponent<RectTransform>());
-        
-        // Hide options initially to let user select
-        if (defouloirOptionsGroup != null) defouloirOptionsGroup.SetActive(false);
+        btnSelectRecette = CreateStyledModeButton(groupModeSelection.transform, "Btn_GoTo_Recette", "RECETTE", new Color(1f, 1f, 1f, 0.08f));
+        btnSelectRecette.onClick.AddListener(() => ShowModeConfig(GameMode.Recette));
+        var rtRec = btnSelectRecette.GetComponent<RectTransform>();
+        rtRec.sizeDelta = new Vector2(450, 140);
+        rtRec.anchoredPosition = new Vector2(0, -160);
+
+        // --- GROUPE 2 : CONFIGURATION ---
+        groupConfig = new GameObject("Group_Config");
+        groupConfig.layer = canvasGo.layer;
+        groupConfig.transform.SetParent(panelGo.transform, false);
+        var rtConf = groupConfig.AddComponent<RectTransform>();
+        rtConf.anchorMin = Vector2.zero; rtConf.anchorMax = Vector2.one;
+        rtConf.offsetMin = Vector2.zero; rtConf.offsetMax = Vector2.zero;
+
+        var configTitle = CreateLabel(groupConfig.transform, "CONFIGURATION", 35);
+        configTitle.name = "ConfigTitle";
+        configTitle.color = Color.white;
+        configTitle.rectTransform.anchoredPosition = new Vector2(0, 150);
+
+        SetupConfigRows(groupConfig.transform);
+
+        // Bouton RETOUR
+        var btnBack = CreateButton(groupConfig.transform, "Btn_Back", "RETOUR");
+        btnBack.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.05f);
+        var rtBack = btnBack.GetComponent<RectTransform>();
+        rtBack.sizeDelta = new Vector2(350, 80);
+        rtBack.anchoredPosition = new Vector2(0, -230); // Centré (X=0)
+        btnBack.onClick.AddListener(ShowModeSelection);
+
+        // Bouton LANCER
+        var btnPlay = CreateButton(groupConfig.transform, "Btn_Lancer", "LANCER LA PARTIE");
+        btnPlay.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.15f);
+        var rtPlay = btnPlay.GetComponent<RectTransform>();
+        rtPlay.sizeDelta = new Vector2(550, 120);
+        rtPlay.anchoredPosition = new Vector2(0, -350); // Centré (X=0)
+        btnPlay.onClick.AddListener(StartMode);
+
+        groupConfig.SetActive(false);
 
         return canvasGo;
+    }
+
+    private void SetupConfigRows(Transform parent)
+    {
+        rowDuration = CreateConfigRow(parent, "DUREE", -20);
+        rowDifficulty = CreateConfigRow(parent, "DIFFICULTE", -90);
+        rowWeapon = CreateConfigRow(parent, "ARME", -160);
+
+        PopulateRowDuration(rowDuration.transform);
+        PopulateRowDifficulty(rowDifficulty.transform);
+        PopulateRowWeapon(rowWeapon.transform);
+    }
+
+    private GameObject CreateConfigRow(Transform parent, string label, float yPos)
+    {
+        var row = new GameObject("Row_" + label);
+        row.layer = parent.gameObject.layer;
+        row.transform.SetParent(parent, false);
+        var rt = row.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0, 0.5f); rt.anchorMax = new Vector2(1, 0.5f);
+        rt.anchoredPosition = new Vector2(0, yPos);
+        rt.sizeDelta = new Vector2(0, 60);
+
+        var lbl = CreateLabel(row.transform, label + " :", 24);
+        lbl.alignment = TextAlignmentOptions.Left;
+        lbl.rectTransform.anchoredPosition = new Vector2(-320, 0); 
+        lbl.rectTransform.sizeDelta = new Vector2(250, 40);
+
+        return row;
+    }
+
+    private void PopulateRowDuration(Transform rowParent)
+    {
+        var slider = CreateSlider(rowParent);
+        slider.minValue = 1f; slider.maxValue = 15f; slider.wholeNumbers = true;
+        slider.value = defouloirDurationMinutes;
+        var rt = slider.GetComponent<RectTransform>();
+        rt.anchoredPosition = new Vector2(40, 0);
+        rt.sizeDelta = new Vector2(350, 30);
+
+        var valLbl = CreateLabel(rowParent, $"{Mathf.RoundToInt(defouloirDurationMinutes)} min", 24);
+        valLbl.rectTransform.anchoredPosition = new Vector2(260, 0);
+        
+        slider.onValueChanged.AddListener(v => {
+            defouloirDurationMinutes = v;
+            valLbl.text = $"{Mathf.RoundToInt(v)} min";
+        });
+    }
+
+    private void PopulateRowDifficulty(Transform rowParent)
+    {
+        var easy = CreateSmallButton(rowParent, "Facile");
+        var med = CreateSmallButton(rowParent, "Moyen");
+        var hard = CreateSmallButton(rowParent, "Difficile");
+
+        float startX = -80f; float stepX = 145f;
+        easy.GetComponent<RectTransform>().anchoredPosition = new Vector2(startX, 0);
+        med.GetComponent<RectTransform>().anchoredPosition = new Vector2(startX + stepX, 0);
+        hard.GetComponent<RectTransform>().anchoredPosition = new Vector2(startX + stepX * 2, 0);
+
+        easy.onClick.AddListener(() => SetDifficulty(Difficulty.Facile, easy, med, hard));
+        med.onClick.AddListener(() => SetDifficulty(Difficulty.Moyen, easy, med, hard));
+        hard.onClick.AddListener(() => SetDifficulty(Difficulty.Difficile, easy, med, hard));
+        
+        SetDifficulty(defouloirDifficulty, easy, med, hard);
+    }
+
+    private void PopulateRowWeapon(Transform rowParent)
+    {
+        var knives = CreateSmallButton(rowParent, "Couteaux");
+        var sabre = CreateSmallButton(rowParent, "Sabre");
+
+        knives.GetComponent<RectTransform>().anchoredPosition = new Vector2(-10, 0);
+        sabre.GetComponent<RectTransform>().anchoredPosition = new Vector2(170, 0);
+
+        knives.onClick.AddListener(() => SetWeapon(WeaponType.Couteaux, knives, sabre));
+        sabre.onClick.AddListener(() => SetWeapon(WeaponType.SabreLaser, knives, sabre));
+        
+        SetWeapon(selectedWeapon, knives, sabre);
     }
 
     private static void CreateAccentBar(Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 offset, float height, Color color)
@@ -350,132 +582,15 @@ public class MenuManager : MonoBehaviour
         return btn;
     }
 
-    private GameObject CreateDefouloirOptions(Transform parent)
-    {
-        var group = new GameObject("DefouloirOptions");
-        group.layer = parent.gameObject.layer;
-        group.transform.SetParent(parent, false);
+    // Anciennes méthodes de menu supprimées (Nettoyage)
 
-        var rt = group.AddComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0.5f, 1f);
-        rt.anchorMax = new Vector2(0.5f, 1f);
-        rt.pivot = new Vector2(0.5f, 1f);
-        rt.anchoredPosition = new Vector2(0, -310);
-        rt.sizeDelta = new Vector2(800, 400);
+    // Nettoyage : LayoutRowButtons supprimé
 
-        // Fond semi-transparent pour la zone d'options
-        var optionsBg = new GameObject("OptionsBg");
-        optionsBg.layer = group.layer;
-        optionsBg.transform.SetParent(group.transform, false);
-        var optBgImg = optionsBg.AddComponent<Image>();
-        optBgImg.color = new Color(1f, 1f, 1f, 0.05f);
-        var optBgRt = optionsBg.GetComponent<RectTransform>();
-        optBgRt.anchorMin = Vector2.zero; optBgRt.anchorMax = Vector2.one;
-        optBgRt.offsetMin = new Vector2(-10, -10); optBgRt.offsetMax = new Vector2(10, 10);
-
-        // === HEADER ===
-        var header = CreateLabel(group.transform, "-- PARAMETRES --", 30);
-        header.color = new Color(0f, 0.85f, 1f);
-        header.rectTransform.anchorMin = new Vector2(0.5f, 1f);
-        header.rectTransform.anchorMax = new Vector2(0.5f, 1f);
-        header.rectTransform.pivot = new Vector2(0.5f, 1f);
-        header.rectTransform.anchoredPosition = new Vector2(0, -10);
-        header.rectTransform.sizeDelta = new Vector2(750, 40);
-
-        // === LIGNE 1 : DURÉE ===
-        float row1Y = -65f;
-        var durationLabel = CreateLabel(group.transform, $"Duree: {Mathf.RoundToInt(defouloirDurationMinutes)} min", 26);
-        durationLabel.alignment = TextAlignmentOptions.Left;
-        durationLabel.color = new Color(0.8f, 0.8f, 0.8f);
-        durationLabel.rectTransform.anchorMin = new Vector2(0, 1f);
-        durationLabel.rectTransform.anchorMax = new Vector2(0, 1f);
-        durationLabel.rectTransform.pivot = new Vector2(0, 0.5f);
-        durationLabel.rectTransform.anchoredPosition = new Vector2(20, row1Y);
-        durationLabel.rectTransform.sizeDelta = new Vector2(300, 35);
-
-        var slider = CreateSlider(group.transform);
-        slider.minValue = 1f; slider.maxValue = 15f; slider.wholeNumbers = true;
-        slider.value = Mathf.Clamp(defouloirDurationMinutes, slider.minValue, slider.maxValue);
-        var sliderRt = slider.GetComponent<RectTransform>();
-        sliderRt.anchorMin = new Vector2(0.5f, 1f);
-        sliderRt.anchorMax = new Vector2(0.5f, 1f);
-        sliderRt.anchoredPosition = new Vector2(160, row1Y);
-        slider.onValueChanged.AddListener(v =>
-        {
-            defouloirDurationMinutes = v;
-            if (durationLabel != null)
-                durationLabel.text = $"Duree: {Mathf.RoundToInt(defouloirDurationMinutes)} min";
-        });
-
-        // === SÉPARATEUR ===
-        CreateAccentBar(group.transform, new Vector2(0.05f, 1f), new Vector2(0.95f, 1f), new Vector2(0, -100), 2f, new Color(1f, 1f, 1f, 0.1f));
-
-        // === LIGNE 2 : DIFFICULTÉ ===
-        float row2Y = -135f;
-        var diffLabel = CreateLabel(group.transform, "Difficulte:", 26);
-        diffLabel.alignment = TextAlignmentOptions.Left;
-        diffLabel.color = new Color(0.8f, 0.8f, 0.8f);
-        diffLabel.rectTransform.anchorMin = new Vector2(0, 1f);
-        diffLabel.rectTransform.anchorMax = new Vector2(0, 1f);
-        diffLabel.rectTransform.pivot = new Vector2(0, 0.5f);
-        diffLabel.rectTransform.anchoredPosition = new Vector2(20, row2Y);
-        diffLabel.rectTransform.sizeDelta = new Vector2(220, 35);
-
-        var easy = CreateSmallButton(group.transform, "Facile");
-        var medium = CreateSmallButton(group.transform, "Moyen");
-        var hard = CreateSmallButton(group.transform, "Difficile");
-
-        easy.onClick.AddListener(() => SetDifficulty(Difficulty.Facile, easy, medium, hard));
-        medium.onClick.AddListener(() => SetDifficulty(Difficulty.Moyen, easy, medium, hard));
-        hard.onClick.AddListener(() => SetDifficulty(Difficulty.Difficile, easy, medium, hard));
-
-        // Position difficulté sur la même ligne
-        LayoutRowButtons(easy.GetComponent<RectTransform>(), 0.32f, row2Y);
-        LayoutRowButtons(medium.GetComponent<RectTransform>(), 0.52f, row2Y);
-        LayoutRowButtons(hard.GetComponent<RectTransform>(), 0.78f, row2Y);
-        SetDifficulty(defouloirDifficulty, easy, medium, hard);
-
-        // === SÉPARATEUR ===
-        CreateAccentBar(group.transform, new Vector2(0.05f, 1f), new Vector2(0.95f, 1f), new Vector2(0, -175), 2f, new Color(1f, 1f, 1f, 0.1f));
-
-        // === LIGNE 3 : ARME ===
-        float row3Y = -210f;
-        var weaponLabel = CreateLabel(group.transform, "Arme:", 26);
-        weaponLabel.alignment = TextAlignmentOptions.Left;
-        weaponLabel.color = new Color(0.8f, 0.8f, 0.8f);
-        weaponLabel.rectTransform.anchorMin = new Vector2(0, 1f);
-        weaponLabel.rectTransform.anchorMax = new Vector2(0, 1f);
-        weaponLabel.rectTransform.pivot = new Vector2(0, 0.5f);
-        weaponLabel.rectTransform.anchoredPosition = new Vector2(20, row3Y);
-        weaponLabel.rectTransform.sizeDelta = new Vector2(220, 35);
-
-        btnWeaponKnives = CreateSmallButton(group.transform, "Couteaux");
-        btnWeaponSabre = CreateSmallButton(group.transform, "Sabre");
-
-        btnWeaponKnives.onClick.AddListener(() => SetWeapon(WeaponType.Couteaux));
-        btnWeaponSabre.onClick.AddListener(() => SetWeapon(WeaponType.SabreLaser));
-
-        LayoutRowButtons(btnWeaponKnives.GetComponent<RectTransform>(), 0.38f, row3Y);
-        LayoutRowButtons(btnWeaponSabre.GetComponent<RectTransform>(), 0.68f, row3Y);
-
-        SetWeapon(selectedWeapon);
-        
-        return group;
-    }
-
-    private static void LayoutRowButtons(RectTransform rt, float anchorX, float yOffset)
-    {
-        rt.anchorMin = new Vector2(anchorX, 1f);
-        rt.anchorMax = new Vector2(anchorX, 1f);
-        rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.anchoredPosition = new Vector2(0, yOffset);
-    }
-
-    private void SetWeapon(WeaponType w)
+    private void SetWeapon(WeaponType w, Button k, Button s)
     {
         selectedWeapon = w;
-        SetButtonSelected(btnWeaponKnives, w == WeaponType.Couteaux);
-        SetButtonSelected(btnWeaponSabre, w == WeaponType.SabreLaser);
+        SetButtonSelected(k, w == WeaponType.Couteaux);
+        SetButtonSelected(s, w == WeaponType.SabreLaser);
     }
 
     private void SetDifficulty(Difficulty d, Button easy, Button medium, Button hard)
@@ -491,12 +606,12 @@ public class MenuManager : MonoBehaviour
         if (btn == null) return;
         var img = btn.GetComponent<Image>();
         if (img != null) img.color = selected 
-            ? new Color(0f, 0.85f, 1f, 0.35f)  // Cyan lumineux quand sélectionné
-            : new Color(1f, 1f, 1f, 0.08f);      // Quasi invisible sinon
+            ? new Color(1f, 1f, 1f, 0.2f)    // Blanc translucide quand sélectionné
+            : new Color(1f, 1f, 1f, 0.04f);   // Presque invisible sinon
         var txt = btn.GetComponentInChildren<TextMeshProUGUI>();
         if (txt != null) txt.color = selected
-            ? new Color(0.7f, 1f, 1f)
-            : new Color(0.5f, 0.5f, 0.5f);
+            ? Color.white
+            : new Color(1f, 1f, 1f, 0.4f);
     }
 
     private static void LayoutDifficultyButtons(RectTransform easy, RectTransform medium, RectTransform hard)
@@ -629,10 +744,10 @@ public class MenuManager : MonoBehaviour
         titleGo.layer = parent.gameObject.layer;
         titleGo.transform.SetParent(parent, false);
         var tmp = titleGo.AddComponent<TextMeshProUGUI>();
-        tmp.text = "EDN XR";
+        tmp.text = "FRUIT NINJA";
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.fontSize = 72;
-        tmp.color = new Color(0f, 0.9f, 1f); // Cyan flamboyant
+        tmp.fontSize = 84;
+        tmp.color = Color.white;
         tmp.fontStyle = FontStyles.Bold;
         tmp.enableWordWrapping = false;
 
@@ -648,7 +763,7 @@ public class MenuManager : MonoBehaviour
         subGo.layer = parent.gameObject.layer;
         subGo.transform.SetParent(parent, false);
         var subTmp = subGo.AddComponent<TextMeshProUGUI>();
-        subTmp.text = "FRUIT NINJA VR";
+        subTmp.text = "sa tue";
         subTmp.alignment = TextAlignmentOptions.Center;
         subTmp.fontSize = 24;
         subTmp.color = new Color(1f, 1f, 1f, 0.4f);
@@ -833,8 +948,9 @@ public class MenuManager : MonoBehaviour
     private static Vector3 GetDefaultMenuPosition()
     {
         var cam = Camera.main;
-        if (cam == null) return new Vector3(0, 1.5f, 2.5f);
-        return cam.transform.position + GetFlattenedForward(cam) * 2.5f + Vector3.up * 0.0f;
+        // Position plus haute (1.8m) pour plus de confort
+        if (cam == null) return new Vector3(0, 1.8f, 2.5f);
+        return cam.transform.position + GetFlattenedForward(cam) * 2.5f + Vector3.up * 0.3f;
     }
 
     private static Vector3 GetFlattenedForward(Camera cam)

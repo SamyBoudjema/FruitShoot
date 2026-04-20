@@ -8,8 +8,8 @@ public class RecipeUI : MonoBehaviour
     public TextMeshProUGUI timerText;
     
     // Nouveaux éléments dynamiques Arcade
-    private TextMeshProUGUI strikesText;
-    private TextMeshProUGUI comboText;
+    public TextMeshProUGUI strikesText;
+    public TextMeshProUGUI comboText;
     private float comboHideTime = 0f;
 
     private void Start()
@@ -20,6 +20,7 @@ public class RecipeUI : MonoBehaviour
             GameManager.Instance.OnTimeChanged.AddListener(UpdateTimer);
             GameManager.Instance.OnStrikeChanged.AddListener(UpdateStrikes);
             GameManager.Instance.OnComboTriggered.AddListener(ShowCombo);
+            GameManager.Instance.OnRecipeStringUpdated.AddListener(UpdateRecipeText);
         }
         // Appliquer un paramétrage par défaut robuste et plus esthétique
         ApplyReadableDefaults(recipeText, 32, new Color(1f, 0.6f, 0f), FontStyles.Bold); // Orange
@@ -32,6 +33,11 @@ public class RecipeUI : MonoBehaviour
         // Affichage initial
         UpdateRecipeText("Salade d'Acides : 3 Citrons, 2 Pommes"); // Placeholder
         UpdateModeUI();
+        if (GameManager.Instance != null)
+        {
+            UpdateStrikes(GameManager.Instance.currentStrikes, GameManager.Instance.maxStrikes);
+            UpdateScore(GameManager.Instance.score);
+        }
     }
 
     private void Update()
@@ -63,12 +69,6 @@ public class RecipeUI : MonoBehaviour
     {
         if (strikesText != null)
         {
-            if (GameManager.Instance != null && GameManager.Instance.currentMode == GameMode.Recette)
-            {
-                strikesText.text = ""; // Cache les croix si en mode recette pur
-                return;
-            }
-
             string s = "";
             for (int i = 0; i < max; i++)
             {
@@ -109,8 +109,8 @@ public class RecipeUI : MonoBehaviour
         tmp.enableWordWrapping = true;
         tmp.enableAutoSizing = true;
         tmp.fontSize = baseSize;
-        tmp.fontSizeMin = Mathf.Max(16, baseSize * 0.5f);
-        tmp.fontSizeMax = Mathf.Max(tmp.fontSizeMin + 2, baseSize * 1.5f);
+        tmp.fontSizeMin = 14;
+        tmp.fontSizeMax = baseSize * 1.2f;
         tmp.extraPadding = true;
         tmp.color = color;
         tmp.fontStyle = style;
@@ -184,8 +184,8 @@ public class RecipeUI : MonoBehaviour
             rt.anchorMin = new Vector2(0.5f, 0.5f);
             rt.anchorMax = new Vector2(0.5f, 0.5f);
             rt.pivot = new Vector2(0.5f, 0.5f);
-            rt.anchoredPosition = new Vector2(0, 0);
-            rt.sizeDelta = new Vector2(650, 150);
+            rt.anchoredPosition = new Vector2(0, 5); // Remonté un peu
+            rt.sizeDelta = new Vector2(850, 180); // Élargi et plus haut
             recipeText.alignment = TextAlignmentOptions.Center;
         }
     }

@@ -24,7 +24,9 @@ public class Bomb : MonoBehaviour
 
         if (explosionSound != null)
         {
-            AudioSource.PlayClipAtPoint(explosionSound, transform.position);
+            // On joue le son à la position de la caméra pour qu'il soit bien fort (effet d'impact direct)
+            Vector3 soundPos = Camera.main != null ? Camera.main.transform.position : transform.position;
+            AudioSource.PlayClipAtPoint(explosionSound, soundPos, 1.0f);
         }
 
         Destroy(gameObject);
@@ -62,9 +64,16 @@ public class Bomb : MonoBehaviour
 
     private bool hasTouchedGround = false;
 
+    private void Start()
+    {
+        // Sécurité : détruit le fruit après 5 secondes s'il n'est pas coupé
+        Destroy(gameObject, 5f);
+    }
+
     private void Update()
     {
-        if (transform.position.y < -3f)
+        // Destruction immédiate si l'objet descend trop bas (Y = -2m)
+        if (transform.position.y < -2.0f)
         {
             Destroy(gameObject);
         }
@@ -81,10 +90,11 @@ public class Bomb : MonoBehaviour
             colName.Contains("ground") || 
             colName.Contains("floor") ||
             colTag.Contains("floor") ||
-            colTag.Contains("sol"))
+            colTag.Contains("sol") ||
+            collision.gameObject.layer == LayerMask.NameToLayer("Floor"))
         {
             hasTouchedGround = true;
-            Destroy(gameObject); // Disparition instantanée
+            Destroy(gameObject, 0.1f);
         }
     }
 }

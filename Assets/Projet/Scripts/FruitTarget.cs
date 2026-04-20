@@ -11,8 +11,7 @@ public class FruitTarget : MonoBehaviour
     {
         if (GameManager.Instance != null)
         {
-            GameManager.Instance.AddScore(scoreValue);
-            GameManager.Instance.AddFruitSliced();
+            GameManager.Instance.ProcessFruitSlice(ingredientName);
         }
 
         if (explosionPrefab != null)
@@ -26,18 +25,24 @@ public class FruitTarget : MonoBehaviour
 
         if (explosionSound != null)
         {
-            // Create a temporary object to play the sound at the explosion location
-            // so it doesn't get cut off when the fruit is destroyed
-            AudioSource.PlayClipAtPoint(explosionSound, transform.position);
+            // On joue le son à la position de la caméra pour qu'il soit bien présent (effet ASMR/Proche)
+            Vector3 soundPos = Camera.main != null ? Camera.main.transform.position : transform.position;
+            AudioSource.PlayClipAtPoint(explosionSound, soundPos, 1.0f);
         }
 
         Destroy(gameObject);
     }
 
+    private void Start()
+    {
+        // Sécurité : détruit le fruit après 5 secondes s'il n'est pas coupé
+        Destroy(gameObject, 5f);
+    }
+
     private void Update()
     {
-        // Sécurité abaissée à -3 pour éviter qu'il disparaisse avant de toucher le vrai sol
-        if (transform.position.y < -3f)
+        // Destruction immédiate si l'objet descend trop bas (Y = -2m)
+        if (transform.position.y < -2.0f)
         {
             Destroy(gameObject);
         }
@@ -57,10 +62,11 @@ public class FruitTarget : MonoBehaviour
             colName.Contains("ground") || 
             colName.Contains("floor") ||
             colTag.Contains("floor") ||
-            colTag.Contains("sol"))
+            colTag.Contains("sol") ||
+            collision.gameObject.layer == LayerMask.NameToLayer("Floor"))
         {
             hasTouchedGround = true;
-            Destroy(gameObject); // Disparition instantanée
+            Destroy(gameObject, 0.1f); // Presque instantané pour laisser un micro-temps de calcul si besoin
         }
     }
 
