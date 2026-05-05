@@ -38,6 +38,7 @@ public class RecipeUI : MonoBehaviour
             GameManager.Instance.OnRecipeStringUpdated.AddListener(UpdateRecipeText);
             GameManager.Instance.OnRecipeProgressChanged.AddListener(UpdateRecipeProgress);
             GameManager.Instance.OnRecipeCompleted.AddListener(ShowRecipeCompleted);
+            GameManager.Instance.OnGameOver.AddListener(HideRecetteTablet);
         }
         // Appliquer un paramétrage par défaut robuste et plus esthétique
         ApplyReadableDefaults(recipeText, 28, new Color(1f, 0.6f, 0f), FontStyles.Bold, wordWrap: true); // Orange
@@ -128,10 +129,18 @@ public class RecipeUI : MonoBehaviour
     {
         if (GameManager.Instance == null) return;
 
-        bool show = GameManager.Instance.currentMode == GameMode.Recette && GameManager.Instance.weapon == WeaponType.Couteaux;
+        bool show =
+            GameManager.Instance.isPlaying &&
+            GameManager.Instance.currentMode == GameMode.Recette &&
+            GameManager.Instance.weapon == WeaponType.Couteaux;
         if (orderTabletRoot != null) orderTabletRoot.SetActive(show);
         if (recipeToast != null) recipeToast.gameObject.SetActive(false);
         if (show) PlaceOrderTabletOnce();
+    }
+
+    private void HideRecetteTablet()
+    {
+        if (orderTabletRoot != null) orderTabletRoot.SetActive(false);
     }
 
     private static void ApplyReadableDefaults(TextMeshProUGUI tmp, float baseSize, Color color, FontStyles style, bool wordWrap = false)
@@ -447,7 +456,13 @@ public class RecipeUI : MonoBehaviour
     public void UpdateRecipeProgress(float progress01)
     {
         if (recipeProgressFill != null)
-            recipeProgressFill.fillAmount = Mathf.Clamp01(progress01);
+        {
+            // "Remaining" style: full bar = lots left, empty = almost done.
+            float p = Mathf.Clamp01(progress01);
+            recipeProgressFill.fillAmount = 1f - p;
+            // Color shifts toward green when close to completion.
+            recipeProgressFill.color = Color.Lerp(new Color(1f, 0.45f, 0.15f, 0.90f), new Color(0.25f, 1f, 0.45f, 0.90f), p);
+        }
     }
 
     public void ShowRecipeCompleted()

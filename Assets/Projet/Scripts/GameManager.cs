@@ -78,6 +78,8 @@ public class GameManager : MonoBehaviour
     private bool prevLeftMenuButton;
     private bool prevRightMenuButton;
     private bool prevRightPrimaryButton;
+    private bool prevRightSecondaryButton;
+    private bool prevRestartKey;
 
     private void Awake()
     {
@@ -167,7 +169,7 @@ public class GameManager : MonoBehaviour
         }
 
         HandleMenuInput();
-        HandleRestartInput();
+        HandleQuickActionsInput();
     }
 
     private void HandleMenuInput()
@@ -203,14 +205,17 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void HandleRestartInput()
+    private void HandleQuickActionsInput()
     {
-        // Keyboard fallback (Editor)
         bool restartPressedThisFrame = false;
-        if (Keyboard.current != null && Keyboard.current[Key.R].isPressed && !prevRightPrimaryButton)
-            restartPressedThisFrame = true;
+        bool backToMenuPressedThisFrame = false;
 
-        // Right hand controller primary button (PICO: usually A / X depending on profile).
+        // Keyboard fallback (Editor)
+        bool restartKeyNow = Keyboard.current != null && Keyboard.current[Key.R].isPressed;
+        if (restartKeyNow && !prevRestartKey) restartPressedThisFrame = true;
+        prevRestartKey = restartKeyNow;
+
+        // Right hand controller primary button (PICO: usually A) => Restart
         UnityEngine.XR.InputDevice rightHand = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.RightHand);
         bool rightPrimaryNow = false;
         if (rightHand.isValid && rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out bool pb))
@@ -221,15 +226,33 @@ public class GameManager : MonoBehaviour
 
         prevRightPrimaryButton = rightPrimaryNow;
 
-        if (!restartPressedThisFrame) return;
+        // Right hand controller secondary button (PICO: usually B) => Back to main menu
+        bool rightSecondaryNow = false;
+        if (rightHand.isValid && rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.secondaryButton, out bool sb))
+            rightSecondaryNow = sb;
 
-        // Restart current mode with current settings.
-        StartGame();
-        var mm = FindFirstObjectByType<MenuManager>();
-        if (mm != null)
+        if (rightSecondaryNow && !prevRightSecondaryButton)
+            backToMenuPressedThisFrame = true;
+
+        prevRightSecondaryButton = rightSecondaryNow;
+
+        if (backToMenuPressedThisFrame)
         {
-            // Hide menus if they are up
-            mm.SendMessage("HideMenusAndShowGameUI", SendMessageOptions.DontRequireReceiver);
+            EndGame();
+            var mm = FindFirstObjectByType<MenuManager>();
+            if (mm != null) mm.ShowMainMenu();
+            return;
+        }
+
+        if (restartPressedThisFrame)
+        {
+            // Restart current mode with current settings.
+            StartGame();
+            var mm = FindFirstObjectByType<MenuManager>();
+            if (mm != null)
+            {
+                mm.SendMessage("HideMenusAndShowGameUI", SendMessageOptions.DontRequireReceiver);
+            }
         }
     }
 
@@ -279,6 +302,10 @@ public class GameManager : MonoBehaviour
 
         if (currentMode == GameMode.Recette)
         {
+            // Hard reset for recette scoring (score == recipes completed)
+            recipesCompleted = 0;
+            score = 0;
+            OnScoreChanged?.Invoke(score);
             GenerateRandomRecipe();
         }
 

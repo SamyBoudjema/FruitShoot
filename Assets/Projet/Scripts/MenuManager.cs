@@ -340,6 +340,8 @@ public class MenuManager : MonoBehaviour
         panelGo.transform.SetParent(canvasGo.transform, false);
         var panelImage = panelGo.AddComponent<Image>();
         panelImage.color = new Color(0.18f, 0.18f, 0.18f, 1f);
+        // Clip leaderboard content so text can't escape the tablet.
+        panelGo.AddComponent<RectMask2D>();
         var panelRect = panelGo.GetComponent<RectTransform>();
         panelRect.anchorMin = Vector2.zero; panelRect.anchorMax = Vector2.one;
         panelRect.offsetMin = Vector2.zero; panelRect.offsetMax = Vector2.zero;
@@ -350,32 +352,37 @@ public class MenuManager : MonoBehaviour
         lbTitle.rectTransform.anchoredPosition = new Vector2(0, 300);
         lbTitle.rectTransform.sizeDelta = new Vector2(480, 50);
 
-        leaderboardText = CreateLabel(panelGo.transform, "1. ---\n2. ---\n3. ---", 26);
-        leaderboardText.alignment = TextAlignmentOptions.TopLeft;
-        leaderboardText.enableWordWrapping = false;
-        leaderboardText.color = new Color(1f, 1f, 1f, 0.80f);
-        // Keep text fully inside the panel.
-        leaderboardText.rectTransform.anchoredPosition = new Vector2(-10, 225);
-        leaderboardText.rectTransform.sizeDelta = new Vector2(460, 360);
-
         var nameLabel = CreateLabel(panelGo.transform, "TON NOM :", 22);
         nameLabel.alignment = TextAlignmentOptions.Left;
         nameLabel.color = new Color(1f, 1f, 1f, 0.55f);
-        nameLabel.rectTransform.anchoredPosition = new Vector2(-195, -210);
+        // Put pseudo right under the title (clean).
+        nameLabel.rectTransform.anchoredPosition = new Vector2(-195, 240);
         nameLabel.rectTransform.sizeDelta = new Vector2(340, 40);
 
         nameInputField = CreateNameInputField(panelGo.transform);
         var nameRt = nameInputField.GetComponent<RectTransform>();
-        nameRt.anchoredPosition = new Vector2(0, -255);
+        nameRt.anchoredPosition = new Vector2(0, 195);
         nameRt.sizeDelta = new Vector2(430, 70);
 
         var btnSave = CreateButton(panelGo.transform, "Btn_SaveScore", "ENREGISTRER");
         btnSave.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.10f);
         var rtSave = btnSave.GetComponent<RectTransform>();
         rtSave.sizeDelta = new Vector2(430, 85);
-        // Keep inside bottom bounds.
-        rtSave.anchoredPosition = new Vector2(0, -335);
+        rtSave.anchoredPosition = new Vector2(0, 110);
         btnSave.onClick.AddListener(SaveLeaderboardNameAndScore);
+
+        // Leaderboard list BELOW the input block (no overlap)
+        leaderboardText = CreateLabel(panelGo.transform, "1. ---\n2. ---\n3. ---", 26);
+        leaderboardText.alignment = TextAlignmentOptions.TopLeft;
+        leaderboardText.enableWordWrapping = false;
+        leaderboardText.overflowMode = TextOverflowModes.Truncate;
+        leaderboardText.color = new Color(1f, 1f, 1f, 0.80f);
+        var lbRt = leaderboardText.rectTransform;
+        lbRt.anchorMin = new Vector2(0.5f, 0f);
+        lbRt.anchorMax = new Vector2(0.5f, 0f);
+        lbRt.pivot = new Vector2(0.5f, 0f);
+        lbRt.anchoredPosition = new Vector2(0, 18);
+        lbRt.sizeDelta = new Vector2(460, 320);
 
         canvasGo.SetActive(false);
         return canvasGo;
@@ -465,8 +472,8 @@ public class MenuManager : MonoBehaviour
         }
         else
         {
-            // Update score (use latest, as requested).
-            existing.score = GameManager.Instance.score;
+            // Update score (keep best).
+            existing.score = Mathf.Max(existing.score, GameManager.Instance.score);
             existing.name = name; // keep user's capitalization
         }
 
