@@ -11,6 +11,19 @@ public class MenuManager : MonoBehaviour
     public GameObject mainMenuPanel;    // Le menu avec les boutons de mode de jeu
     public GameObject gameUIPanel;      // L'interface en jeu (Score, Temps, etc.)
     public GameObject gameOverPanel;    // Le menu de fin de partie
+    public GameObject leaderboardPanel; // Panneau séparé à droite (Game Over)
+
+    [Header("UI Anchor (fixed world position)")]
+    [Tooltip("Place a scene object named UI_Anchor and assign it here to keep menus in a fixed position.")]
+    public Transform uiAnchor;
+
+    [Header("HUD Anchor (fixed world position)")]
+    [Tooltip("Optional: scene object named HUD_Anchor. If present, the in-game HUD is placed here.")]
+    public Transform hudAnchor;
+
+    [Header("Leaderboard Anchor (fixed world position)")]
+    [Tooltip("Optional: scene object named Leaderboard_Anchor. If present, the leaderboard tablet is placed here.")]
+    public Transform leaderboardAnchor;
 
     [Header("Defouloir options (menu)")]
     public float defouloirDurationMinutes = 5f;
@@ -34,14 +47,58 @@ public class MenuManager : MonoBehaviour
     private TextMeshProUGUI goFruitsText;
     private TextMeshProUGUI goBombsText;
 
+    // Leaderboard (separate panel)
+    private TextMeshProUGUI leaderboardText;
+    private TMP_InputField nameInputField;
+    private const string LeaderboardPrefsKey_Defouloir = "edn.leaderboard.defouloir.v1";
+    private const string LeaderboardPrefsKey_Recette = "edn.leaderboard.recette.v1";
+
+    [Serializable]
+    private class LeaderboardEntry
+    {
+        public string name;
+        public int score;
+    }
+
+    [Serializable]
+    private class LeaderboardData
+    {
+        public System.Collections.Generic.List<LeaderboardEntry> entries = new System.Collections.Generic.List<LeaderboardEntry>();
+    }
+
     private WeaponType selectedWeapon = WeaponType.Couteaux;
     private Button btnWeaponKnives;
     private Button btnWeaponSabre;
 
+    // Fixed UI pose (captured once at spawn so menus don't appear "where you look").
+    private bool fixedUiPoseCaptured;
+    private Vector3 fixedMenuPosition;
+    private Quaternion fixedMenuRotation;
+
     private void Start()
     {
+        // If MenuManager is auto-created, we can't assign references in Inspector.
+        // Auto-find a scene anchor if present.
+        if (uiAnchor == null)
+        {
+            var anchorGo = GameObject.Find("UI_Anchor");
+            if (anchorGo != null) uiAnchor = anchorGo.transform;
+        }
+        if (hudAnchor == null)
+        {
+            var hudGo = GameObject.Find("HUD_Anchor");
+            if (hudGo != null) hudAnchor = hudGo.transform;
+        }
+        if (leaderboardAnchor == null)
+        {
+            var lbGo = GameObject.Find("Leaderboard_Anchor");
+            if (lbGo != null) leaderboardAnchor = lbGo.transform;
+        }
+
+        CaptureFixedUiPoseIfNeeded();
         AutoWirePanelsIfNeeded();
         EnsureEventSystemExists();
+        EnsureXRInteractionManagerExists();
         EnsureRightHandRayInteractorForUI();
         EnsureMenuUIExists();
         EnsureBannerHudLayout();
@@ -59,6 +116,7 @@ public class MenuManager : MonoBehaviour
         if (mainMenuPanel != null) mainMenuPanel.SetActive(true);
         if (gameUIPanel != null) gameUIPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (leaderboardPanel != null) leaderboardPanel.SetActive(false);
 
         ShowModeSelection(); // On revient toujours au choix du mode au dbut
         TeleportPlayerInFrontOfMenu();
@@ -80,7 +138,10 @@ public class MenuManager : MonoBehaviour
         bool isDefouloir = (mode == GameMode.Defouloir);
         if (rowDuration != null) rowDuration.SetActive(isDefouloir);
         if (rowDifficulty != null) rowDifficulty.SetActive(isDefouloir);
-        if (rowWeapon != null) rowWeapon.SetActive(true); // L'arme est toujours là
+        // Recette: uniquement couteaux (pas de sabre).
+        if (!isDefouloir)
+            selectedWeapon = WeaponType.Couteaux;
+        if (rowWeapon != null) rowWeapon.SetActive(isDefouloir);
 
         // On ajuste le titre de la config
         var title = groupConfig.transform.Find("ConfigTitle")?.GetComponent<TextMeshProUGUI>();
@@ -93,9 +154,13 @@ public class MenuManager : MonoBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.Instance.currentMode = selectedMode;
-            GameManager.Instance.gameDuration = Mathf.Clamp(defouloirDurationMinutes, 1f, 20f) * 60f;
+            // Defouloir uses configurable duration; Recette uses a shorter fixed session by default.
+            GameManager.Instance.gameDuration = (selectedMode == GameMode.Recette)
+                ? 150f // 2m30
+                : Mathf.Clamp(defouloirDurationMinutes, 1f, 20f) * 60f;
             GameManager.Instance.difficulty = defouloirDifficulty;
-            GameManager.Instance.weapon = selectedWeapon;
+            // Recette: forcer couteaux
+            GameManager.Instance.weapon = (selectedMode == GameMode.Recette) ? WeaponType.Couteaux : selectedWeapon;
             
             GameManager.Instance.StartGame();
         }
@@ -107,6 +172,7 @@ public class MenuManager : MonoBehaviour
     {
         if (mainMenuPanel != null) mainMenuPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (leaderboardPanel != null) leaderboardPanel.SetActive(false);
 
         // On s'assure d'avoir bien raccordé le HUD avant de l'afficher
         AutoWirePanelsIfNeeded();
@@ -123,17 +189,24 @@ public class MenuManager : MonoBehaviour
                 canvas.renderMode = RenderMode.WorldSpace;
             }
 
-            // Snap HUD to a fixed position in front of the player
-            var cam = Camera.main;
-            if (cam != null)
+            // Place HUD using anchor if present (fixed in world).
+            if (hudAnchor != null)
             {
-                var fwd = GetFlattenedForward(cam);
-                // Position plus haute dans le ciel (3.2m de hauteur)
-                gameUIPanel.transform.position = cam.transform.position + fwd * 6.5f + Vector3.up * 3.2f;
-                gameUIPanel.transform.rotation = Quaternion.LookRotation(fwd, Vector3.up);
-                
-                // On force une échelle correcte pour que ce soit visible !
+                gameUIPanel.transform.position = hudAnchor.position;
+                gameUIPanel.transform.rotation = hudAnchor.rotation;
                 gameUIPanel.transform.localScale = Vector3.one * 0.007f;
+            }
+            else
+            {
+                // Fallback: in front of the player
+                var cam = Camera.main;
+                if (cam != null)
+                {
+                    var fwd = GetFlattenedForward(cam);
+                    gameUIPanel.transform.position = cam.transform.position + fwd * 6.5f + Vector3.up * 3.2f;
+                    gameUIPanel.transform.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+                    gameUIPanel.transform.localScale = Vector3.one * 0.007f;
+                }
             }
         }
     }
@@ -142,19 +215,14 @@ public class MenuManager : MonoBehaviour
     {
         if (gameUIPanel != null) gameUIPanel.SetActive(false);
         EnsureGameOverUIExists();
+        EnsureLeaderboardUIExists();
         if (gameOverPanel != null) 
         {
             gameOverPanel.SetActive(true);
             RefreshGameOverStats();
-            
-            var cam = Camera.main;
-            if (cam != null)
-            {
-                var fwd = GetFlattenedForward(cam);
-                gameOverPanel.transform.position = cam.transform.position + fwd * 2.5f + Vector3.up * 0.0f;
-                gameOverPanel.transform.rotation = Quaternion.LookRotation(fwd, Vector3.up);
-            }
         }
+
+        PositionLeaderboardPanel();
     }
 
     private void EnsureGameOverUIExists()
@@ -163,12 +231,20 @@ public class MenuManager : MonoBehaviour
         gameOverPanel = CreateGameOverCanvas();
     }
 
+    private void EnsureLeaderboardUIExists()
+    {
+        if (leaderboardPanel != null) return;
+        leaderboardPanel = CreateLeaderboardCanvas();
+    }
+
     private void RefreshGameOverStats()
     {
         if (GameManager.Instance == null) return;
         if (goScoreText != null) goScoreText.text = $"SCORE FINAL : {GameManager.Instance.score}";
         if (goFruitsText != null) goFruitsText.text = $"FRUITS TRANCHÉS : {GameManager.Instance.fruitsSliced}";
         // goBombsText n'est plus utilisé
+
+        RefreshLeaderboardUI();
     }
 
     private GameObject CreateGameOverCanvas()
@@ -190,8 +266,10 @@ public class MenuManager : MonoBehaviour
         );
 
         var rect = canvasGo.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(900, 700);
+        rect.sizeDelta = new Vector2(900, 720);
         rect.localScale = Vector3.one * 0.003f;
+        rect.position = GetFixedMenuPosition();
+        rect.rotation = GetFixedMenuRotation();
 
         var panelGo = new GameObject("Panel");
         panelGo.layer = canvasGo.layer;
@@ -226,11 +304,225 @@ public class MenuManager : MonoBehaviour
         var btnReturn = CreateButton(panelGo.transform, "Bouton_Retour", "RETOUR AU MENU");
         btnReturn.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.08f);
         var rtBtn = btnReturn.GetComponent<RectTransform>();
-        rtBtn.sizeDelta = new Vector2(480, 100);
-        rtBtn.anchoredPosition = new Vector2(0, -220);
+        rtBtn.sizeDelta = new Vector2(520, 105);
+        rtBtn.anchoredPosition = new Vector2(0, -240);
         btnReturn.onClick.AddListener(ShowMainMenu);
 
         return canvasGo;
+    }
+
+    private GameObject CreateLeaderboardCanvas()
+    {
+        var canvasGo = new GameObject("Leaderboard_Canvas");
+        canvasGo.layer = LayerMask.NameToLayer("UI");
+
+        var canvas = canvasGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+
+        var scaler = canvasGo.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+        scaler.dynamicPixelsPerUnit = 10f;
+
+        canvasGo.AddComponent<GraphicRaycaster>();
+        TryAddComponentByName(
+            canvasGo,
+            "UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster, Unity.XR.Interaction.Toolkit"
+        );
+
+        var rect = canvasGo.GetComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(520, 720);
+        rect.localScale = Vector3.one * 0.003f;
+        rect.position = GetFixedMenuPosition();
+        rect.rotation = GetFixedMenuRotation();
+
+        var panelGo = new GameObject("Panel");
+        panelGo.layer = canvasGo.layer;
+        panelGo.transform.SetParent(canvasGo.transform, false);
+        var panelImage = panelGo.AddComponent<Image>();
+        panelImage.color = new Color(0.18f, 0.18f, 0.18f, 1f);
+        var panelRect = panelGo.GetComponent<RectTransform>();
+        panelRect.anchorMin = Vector2.zero; panelRect.anchorMax = Vector2.one;
+        panelRect.offsetMin = Vector2.zero; panelRect.offsetMax = Vector2.zero;
+
+        var lbTitle = CreateLabel(panelGo.transform, "LEADERBOARD", 30);
+        lbTitle.color = Color.white;
+        lbTitle.fontStyle = FontStyles.Bold;
+        lbTitle.rectTransform.anchoredPosition = new Vector2(0, 300);
+        lbTitle.rectTransform.sizeDelta = new Vector2(480, 50);
+
+        leaderboardText = CreateLabel(panelGo.transform, "1. ---\n2. ---\n3. ---", 26);
+        leaderboardText.alignment = TextAlignmentOptions.TopLeft;
+        leaderboardText.enableWordWrapping = false;
+        leaderboardText.color = new Color(1f, 1f, 1f, 0.80f);
+        // Keep text fully inside the panel.
+        leaderboardText.rectTransform.anchoredPosition = new Vector2(-10, 225);
+        leaderboardText.rectTransform.sizeDelta = new Vector2(460, 360);
+
+        var nameLabel = CreateLabel(panelGo.transform, "TON NOM :", 22);
+        nameLabel.alignment = TextAlignmentOptions.Left;
+        nameLabel.color = new Color(1f, 1f, 1f, 0.55f);
+        nameLabel.rectTransform.anchoredPosition = new Vector2(-195, -210);
+        nameLabel.rectTransform.sizeDelta = new Vector2(340, 40);
+
+        nameInputField = CreateNameInputField(panelGo.transform);
+        var nameRt = nameInputField.GetComponent<RectTransform>();
+        nameRt.anchoredPosition = new Vector2(0, -255);
+        nameRt.sizeDelta = new Vector2(430, 70);
+
+        var btnSave = CreateButton(panelGo.transform, "Btn_SaveScore", "ENREGISTRER");
+        btnSave.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.10f);
+        var rtSave = btnSave.GetComponent<RectTransform>();
+        rtSave.sizeDelta = new Vector2(430, 85);
+        // Keep inside bottom bounds.
+        rtSave.anchoredPosition = new Vector2(0, -335);
+        btnSave.onClick.AddListener(SaveLeaderboardNameAndScore);
+
+        canvasGo.SetActive(false);
+        return canvasGo;
+    }
+
+    private void PositionLeaderboardPanel()
+    {
+        if (leaderboardPanel == null) return;
+        if (gameOverPanel == null) return;
+        leaderboardPanel.SetActive(true);
+        if (leaderboardAnchor != null)
+        {
+            leaderboardPanel.transform.position = leaderboardAnchor.position;
+            leaderboardPanel.transform.rotation = leaderboardAnchor.rotation;
+            return;
+        }
+
+        // Fallback: tablet next to GameOver (world-space).
+        leaderboardPanel.transform.position = gameOverPanel.transform.position + gameOverPanel.transform.right * 1.25f;
+        leaderboardPanel.transform.rotation = gameOverPanel.transform.rotation;
+    }
+
+    private TMP_InputField CreateNameInputField(Transform parent)
+    {
+        var root = new GameObject("NameInputField");
+        root.layer = parent.gameObject.layer;
+        root.transform.SetParent(parent, false);
+
+        var img = root.AddComponent<Image>();
+        img.color = new Color(0f, 0f, 0f, 0.25f);
+
+        var input = root.AddComponent<TMP_InputField>();
+
+        // Text
+        var textGo = new GameObject("Text");
+        textGo.layer = root.layer;
+        textGo.transform.SetParent(root.transform, false);
+        var text = textGo.AddComponent<TextMeshProUGUI>();
+        text.text = "";
+        text.fontSize = 34;
+        text.color = new Color(0.9f, 0.95f, 1f, 0.95f);
+        text.alignment = TextAlignmentOptions.MidlineLeft;
+        text.enableWordWrapping = false;
+        var textRt = text.rectTransform;
+        textRt.anchorMin = Vector2.zero;
+        textRt.anchorMax = Vector2.one;
+        textRt.offsetMin = new Vector2(18, 10);
+        textRt.offsetMax = new Vector2(-18, -10);
+
+        // Placeholder
+        var phGo = new GameObject("Placeholder");
+        phGo.layer = root.layer;
+        phGo.transform.SetParent(root.transform, false);
+        var ph = phGo.AddComponent<TextMeshProUGUI>();
+        ph.text = "Entre ton nom...";
+        ph.fontSize = 32;
+        ph.color = new Color(1f, 1f, 1f, 0.25f);
+        ph.alignment = TextAlignmentOptions.MidlineLeft;
+        ph.enableWordWrapping = false;
+        var phRt = ph.rectTransform;
+        phRt.anchorMin = Vector2.zero;
+        phRt.anchorMax = Vector2.one;
+        phRt.offsetMin = new Vector2(18, 10);
+        phRt.offsetMax = new Vector2(-18, -10);
+
+        input.textComponent = text;
+        input.placeholder = ph;
+        input.characterLimit = 14;
+        input.contentType = TMP_InputField.ContentType.Name;
+
+        return input;
+    }
+
+    private void SaveLeaderboardNameAndScore()
+    {
+        if (GameManager.Instance == null) return;
+        if (nameInputField == null) return;
+
+        var name = (nameInputField.text ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var data = LoadLeaderboard();
+        var existing = data.entries.Find(e => string.Equals(e.name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing == null)
+        {
+            data.entries.Add(new LeaderboardEntry { name = name, score = GameManager.Instance.score });
+        }
+        else
+        {
+            // Update score (use latest, as requested).
+            existing.score = GameManager.Instance.score;
+            existing.name = name; // keep user's capitalization
+        }
+
+        data.entries.Sort((a, b) => b.score.CompareTo(a.score));
+        if (data.entries.Count > 12) data.entries.RemoveRange(12, data.entries.Count - 12);
+
+        PlayerPrefs.SetString(GetLeaderboardKeyForCurrentMode(), JsonUtility.ToJson(data));
+        PlayerPrefs.Save();
+        RefreshLeaderboardUI();
+    }
+
+    private void RefreshLeaderboardUI()
+    {
+        if (leaderboardText == null) return;
+        var data = LoadLeaderboard();
+        data.entries.Sort((a, b) => b.score.CompareTo(a.score));
+
+        int max = Mathf.Min(8, data.entries.Count);
+        if (max <= 0)
+        {
+            leaderboardText.text = "1. ---\n2. ---\n3. ---\n4. ---\n5. ---";
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < max; i++)
+        {
+            var e = data.entries[i];
+            sb.Append($"{i + 1}. {e.name}  —  {e.score}");
+            if (i != max - 1) sb.Append('\n');
+        }
+        leaderboardText.text = sb.ToString();
+    }
+
+    private static LeaderboardData LoadLeaderboard()
+    {
+        try
+        {
+            var key = GetLeaderboardKeyForCurrentMode();
+            var json = PlayerPrefs.GetString(key, "");
+            if (string.IsNullOrWhiteSpace(json)) return new LeaderboardData();
+            var data = JsonUtility.FromJson<LeaderboardData>(json);
+            return data ?? new LeaderboardData();
+        }
+        catch
+        {
+            return new LeaderboardData();
+        }
+    }
+
+    private static string GetLeaderboardKeyForCurrentMode()
+    {
+        if (GameManager.Instance == null) return LeaderboardPrefsKey_Defouloir;
+        return GameManager.Instance.currentMode == GameMode.Recette
+            ? LeaderboardPrefsKey_Recette
+            : LeaderboardPrefsKey_Defouloir;
     }
 
     private void AutoWirePanelsIfNeeded()
@@ -393,10 +685,11 @@ public class MenuManager : MonoBehaviour
         );
 
         var rect = canvasGo.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(950, 900);
+        // Slightly taller so the config screen breathes (VR comfort).
+        rect.sizeDelta = new Vector2(980, 980);
         rect.localScale = Vector3.one * 0.002f;
-        rect.position = GetDefaultMenuPosition();
-        rect.rotation = Quaternion.LookRotation(GetFlattenedForward(Camera.main), Vector3.up);
+        rect.position = GetFixedMenuPosition();
+        rect.rotation = GetFixedMenuRotation();
 
         // ===== FOND PRINCIPAL SOMBRE =====
         var panelGo = new GameObject("Panel");
@@ -438,7 +731,8 @@ public class MenuManager : MonoBehaviour
         rtDef.anchoredPosition = new Vector2(0, 0);
 
         btnSelectRecette = CreateStyledModeButton(groupModeSelection.transform, "Btn_GoTo_Recette", "RECETTE", new Color(1f, 1f, 1f, 0.08f));
-        btnSelectRecette.onClick.AddListener(() => ShowModeConfig(GameMode.Recette));
+        // Recette: lance direct (pas d'écran config).
+        btnSelectRecette.onClick.AddListener(() => { selectedMode = GameMode.Recette; StartMode(); });
         var rtRec = btnSelectRecette.GetComponent<RectTransform>();
         rtRec.sizeDelta = new Vector2(450, 140);
         rtRec.anchoredPosition = new Vector2(0, -160);
@@ -451,27 +745,38 @@ public class MenuManager : MonoBehaviour
         rtConf.anchorMin = Vector2.zero; rtConf.anchorMax = Vector2.one;
         rtConf.offsetMin = Vector2.zero; rtConf.offsetMax = Vector2.zero;
 
-        var configTitle = CreateLabel(groupConfig.transform, "CONFIGURATION", 35);
+        // ----- CONFIG LAYOUT (stable margins/spacings) -----
+        var configRoot = new GameObject("ConfigRoot");
+        configRoot.layer = canvasGo.layer;
+        configRoot.transform.SetParent(groupConfig.transform, false);
+        var configRootRt = configRoot.AddComponent<RectTransform>();
+        configRootRt.anchorMin = new Vector2(0.5f, 0.5f);
+        configRootRt.anchorMax = new Vector2(0.5f, 0.5f);
+        configRootRt.pivot = new Vector2(0.5f, 0.5f);
+        configRootRt.anchoredPosition = new Vector2(0, -20);
+        configRootRt.sizeDelta = new Vector2(860, 760);
+
+        var configTitle = CreateLabel(configRoot.transform, "CONFIGURATION", 35);
         configTitle.name = "ConfigTitle";
         configTitle.color = Color.white;
-        configTitle.rectTransform.anchoredPosition = new Vector2(0, 150);
+        configTitle.rectTransform.anchoredPosition = new Vector2(0, 320);
 
-        SetupConfigRows(groupConfig.transform);
+        SetupConfigRows(configRoot.transform);
 
         // Bouton RETOUR
-        var btnBack = CreateButton(groupConfig.transform, "Btn_Back", "RETOUR");
+        var btnBack = CreateButton(configRoot.transform, "Btn_Back", "RETOUR");
         btnBack.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.05f);
         var rtBack = btnBack.GetComponent<RectTransform>();
-        rtBack.sizeDelta = new Vector2(350, 80);
-        rtBack.anchoredPosition = new Vector2(0, -230); // Centré (X=0)
+        rtBack.sizeDelta = new Vector2(420, 90);
+        rtBack.anchoredPosition = new Vector2(0, -250);
         btnBack.onClick.AddListener(ShowModeSelection);
 
         // Bouton LANCER
-        var btnPlay = CreateButton(groupConfig.transform, "Btn_Lancer", "LANCER LA PARTIE");
+        var btnPlay = CreateButton(configRoot.transform, "Btn_Lancer", "LANCER LA PARTIE");
         btnPlay.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.15f);
         var rtPlay = btnPlay.GetComponent<RectTransform>();
-        rtPlay.sizeDelta = new Vector2(550, 120);
-        rtPlay.anchoredPosition = new Vector2(0, -350); // Centré (X=0)
+        rtPlay.sizeDelta = new Vector2(620, 130);
+        rtPlay.anchoredPosition = new Vector2(0, -355);
         btnPlay.onClick.AddListener(StartMode);
 
         groupConfig.SetActive(false);
@@ -481,9 +786,10 @@ public class MenuManager : MonoBehaviour
 
     private void SetupConfigRows(Transform parent)
     {
-        rowDuration = CreateConfigRow(parent, "DUREE", -20);
-        rowDifficulty = CreateConfigRow(parent, "DIFFICULTE", -90);
-        rowWeapon = CreateConfigRow(parent, "ARME", -160);
+        // More spacing + slightly higher placement (less cramped in XR).
+        rowDuration = CreateConfigRow(parent, "DURÉE", 170);
+        rowDifficulty = CreateConfigRow(parent, "DIFFICULTÉ", 55);
+        rowWeapon = CreateConfigRow(parent, "ARME", -60);
 
         PopulateRowDuration(rowDuration.transform);
         PopulateRowDifficulty(rowDifficulty.transform);
@@ -498,12 +804,13 @@ public class MenuManager : MonoBehaviour
         var rt = row.AddComponent<RectTransform>();
         rt.anchorMin = new Vector2(0, 0.5f); rt.anchorMax = new Vector2(1, 0.5f);
         rt.anchoredPosition = new Vector2(0, yPos);
-        rt.sizeDelta = new Vector2(0, 60);
+        rt.sizeDelta = new Vector2(0, 90);
 
-        var lbl = CreateLabel(row.transform, label + " :", 24);
+        var lbl = CreateLabel(row.transform, label + " :", 26);
         lbl.alignment = TextAlignmentOptions.Left;
-        lbl.rectTransform.anchoredPosition = new Vector2(-320, 0); 
-        lbl.rectTransform.sizeDelta = new Vector2(250, 40);
+        // Keep inside panel bounds (avoid overflow left).
+        lbl.rectTransform.anchoredPosition = new Vector2(-285, 0);
+        lbl.rectTransform.sizeDelta = new Vector2(240, 50);
 
         return row;
     }
@@ -515,10 +822,13 @@ public class MenuManager : MonoBehaviour
         slider.value = defouloirDurationMinutes;
         var rt = slider.GetComponent<RectTransform>();
         rt.anchoredPosition = new Vector2(40, 0);
-        rt.sizeDelta = new Vector2(350, 30);
+        rt.sizeDelta = new Vector2(390, 48);
 
         var valLbl = CreateLabel(rowParent, $"{Mathf.RoundToInt(defouloirDurationMinutes)} min", 24);
-        valLbl.rectTransform.anchoredPosition = new Vector2(260, 0);
+        valLbl.alignment = TextAlignmentOptions.Right;
+        // Keep inside panel bounds (avoid overflow right).
+        valLbl.rectTransform.anchoredPosition = new Vector2(300, 0);
+        valLbl.rectTransform.sizeDelta = new Vector2(170, 50);
         
         slider.onValueChanged.AddListener(v => {
             defouloirDurationMinutes = v;
@@ -532,7 +842,8 @@ public class MenuManager : MonoBehaviour
         var med = CreateSmallButton(rowParent, "Moyen");
         var hard = CreateSmallButton(rowParent, "Difficile");
 
-        float startX = -80f; float stepX = 145f;
+        // Shift right so it doesn't hug the label.
+        float startX = -60f; float stepX = 185f;
         easy.GetComponent<RectTransform>().anchoredPosition = new Vector2(startX, 0);
         med.GetComponent<RectTransform>().anchoredPosition = new Vector2(startX + stepX, 0);
         hard.GetComponent<RectTransform>().anchoredPosition = new Vector2(startX + stepX * 2, 0);
@@ -549,8 +860,8 @@ public class MenuManager : MonoBehaviour
         var knives = CreateSmallButton(rowParent, "Couteaux");
         var sabre = CreateSmallButton(rowParent, "Sabre");
 
-        knives.GetComponent<RectTransform>().anchoredPosition = new Vector2(-10, 0);
-        sabre.GetComponent<RectTransform>().anchoredPosition = new Vector2(170, 0);
+        knives.GetComponent<RectTransform>().anchoredPosition = new Vector2(-95, 0);
+        sabre.GetComponent<RectTransform>().anchoredPosition = new Vector2(95, 0);
 
         knives.onClick.AddListener(() => SetWeapon(WeaponType.Couteaux, knives, sabre));
         sabre.onClick.AddListener(() => SetWeapon(WeaponType.SabreLaser, knives, sabre));
@@ -663,7 +974,7 @@ public class MenuManager : MonoBehaviour
         rt.anchorMax = new Vector2(0.5f, 0.55f);
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.anchoredPosition = new Vector2(160, 0);
-        rt.sizeDelta = new Vector2(520, 30);
+        rt.sizeDelta = new Vector2(520, 48);
 
         var slider = go.AddComponent<Slider>();
 
@@ -684,8 +995,8 @@ public class MenuManager : MonoBehaviour
         fillArea.layer = go.layer;
         fillArea.transform.SetParent(go.transform, false);
         var fillAreaRt = fillArea.AddComponent<RectTransform>();
-        fillAreaRt.anchorMin = new Vector2(0, 0.25f);
-        fillAreaRt.anchorMax = new Vector2(1, 0.75f);
+        fillAreaRt.anchorMin = new Vector2(0, 0.30f);
+        fillAreaRt.anchorMax = new Vector2(1, 0.70f);
         fillAreaRt.offsetMin = new Vector2(10, 0);
         fillAreaRt.offsetMax = new Vector2(-10, 0);
 
@@ -716,7 +1027,7 @@ public class MenuManager : MonoBehaviour
         var handleImg = handle.AddComponent<Image>();
         handleImg.color = new Color(1f, 1f, 1f, 0.85f);
         var handleRt = handle.GetComponent<RectTransform>();
-        handleRt.sizeDelta = new Vector2(18, 18);
+        handleRt.sizeDelta = new Vector2(34, 34);
 
         slider.targetGraphic = handleImg;
         slider.fillRect = fillRt;
@@ -729,10 +1040,10 @@ public class MenuManager : MonoBehaviour
     {
         var btn = CreateButton(parent, $"Diff_{label}", label);
         var rt = btn.GetComponent<RectTransform>();
-        if (rt != null) rt.sizeDelta = new Vector2(150, 55);
+        if (rt != null) rt.sizeDelta = new Vector2(175, 65);
 
         var textTmp = btn.gameObject.GetComponentInChildren<TextMeshProUGUI>();
-        if (textTmp != null) textTmp.fontSize = 26;
+        if (textTmp != null) textTmp.fontSize = 28;
 
         return btn;
     }
@@ -744,7 +1055,7 @@ public class MenuManager : MonoBehaviour
         titleGo.layer = parent.gameObject.layer;
         titleGo.transform.SetParent(parent, false);
         var tmp = titleGo.AddComponent<TextMeshProUGUI>();
-        tmp.text = "FRUIT NINJA";
+        tmp.text = "FRUITSHOOT";
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.fontSize = 84;
         tmp.color = Color.white;
@@ -856,6 +1167,18 @@ public class MenuManager : MonoBehaviour
         }
     }
 
+    private void EnsureXRInteractionManagerExists()
+    {
+        // XRRayInteractor relies on an XRInteractionManager in the scene.
+        // Most XR Origin setups include one, but when building everything from code we ensure it exists.
+        var mgrType = Type.GetType("UnityEngine.XR.Interaction.Toolkit.XRInteractionManager, Unity.XR.Interaction.Toolkit");
+        if (mgrType == null) return;
+        if (FindFirstObjectByType(mgrType) != null) return;
+
+        var go = new GameObject("XR Interaction Manager (Auto)");
+        go.AddComponent(mgrType);
+    }
+
     private static bool TryAddComponentByName(GameObject go, string assemblyQualifiedTypeName)
     {
         var t = Type.GetType(assemblyQualifiedTypeName);
@@ -951,6 +1274,41 @@ public class MenuManager : MonoBehaviour
         // Position plus haute (1.8m) pour plus de confort
         if (cam == null) return new Vector3(0, 1.8f, 2.5f);
         return cam.transform.position + GetFlattenedForward(cam) * 2.5f + Vector3.up * 0.3f;
+    }
+
+    private void CaptureFixedUiPoseIfNeeded()
+    {
+        if (fixedUiPoseCaptured) return;
+
+        // Prefer a scene anchor (true fixed placement).
+        if (uiAnchor != null)
+        {
+            fixedMenuPosition = uiAnchor.position;
+            fixedMenuRotation = uiAnchor.rotation;
+            fixedUiPoseCaptured = true;
+            return;
+        }
+
+        // Fallback: capture once from camera (can be off in XR if tracking not ready).
+        var cam = Camera.main;
+        if (cam == null) return;
+        var fwd = GetFlattenedForward(cam);
+        fixedMenuPosition = cam.transform.position + fwd * 2.5f + Vector3.up * 0.3f;
+        fixedMenuRotation = Quaternion.LookRotation(fwd, Vector3.up);
+        fixedUiPoseCaptured = true;
+    }
+
+    private Vector3 GetFixedMenuPosition()
+    {
+        CaptureFixedUiPoseIfNeeded();
+        return fixedUiPoseCaptured ? fixedMenuPosition : GetDefaultMenuPosition();
+    }
+
+    private Quaternion GetFixedMenuRotation()
+    {
+        CaptureFixedUiPoseIfNeeded();
+        if (fixedUiPoseCaptured) return fixedMenuRotation;
+        return Quaternion.LookRotation(GetFlattenedForward(Camera.main), Vector3.up);
     }
 
     private static Vector3 GetFlattenedForward(Camera cam)

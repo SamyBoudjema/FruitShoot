@@ -58,8 +58,12 @@ public class GameManager : MonoBehaviour
     public UnityEvent<int, int> OnStrikeChanged; // current, max
     public UnityEvent<int, float> OnComboTriggered; // fruits in combo, score multiplier
     public UnityEvent<string> OnRecipeStringUpdated; // Liste des fruits à couper
+    public UnityEvent<float> OnRecipeProgressChanged; // 0..1
+    public UnityEvent OnRecipeCompleted;
 
     private System.Collections.Generic.Dictionary<string, int> currentRecipe = new System.Collections.Generic.Dictionary<string, int>();
+    private int recipeTotalCount;
+    private int recipesCompleted;
 
     [Header("Dev / Safety")]
     [Tooltip("If no MenuManager is present, auto-create one at runtime so the game can start via menu.")]
@@ -68,6 +72,12 @@ public class GameManager : MonoBehaviour
     [Tooltip("Editor-only fallback: if no menu exists, auto-start after a short delay.")]
     public bool autoStartInEditorIfNoMenu = true;
     public float autoStartDelaySeconds = 0.75f;
+
+    // Menu input edge-detection (avoid firing every frame while held).
+    private bool prevMenuKey;
+    private bool prevLeftMenuButton;
+    private bool prevRightMenuButton;
+    private bool prevRightPrimaryButton;
 
     private void Awake()
     {
@@ -157,23 +167,32 @@ public class GameManager : MonoBehaviour
         }
 
         HandleMenuInput();
+        HandleRestartInput();
     }
 
     private void HandleMenuInput()
     {
-        bool menuPressed = false;
+        bool menuPressedThisFrame = false;
 
         // Clavier (New Input System)
-        if (Keyboard.current != null && Keyboard.current[Key.M].wasPressedThisFrame) menuPressed = true;
+        bool keyNow = Keyboard.current != null && Keyboard.current[Key.M].isPressed;
+        if (keyNow && !prevMenuKey) menuPressedThisFrame = true;
+        prevMenuKey = keyNow;
 
         // VR Controllers (Primary Button ou Menu Button)
         UnityEngine.XR.InputDevice leftHand = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.LeftHand);
-        if (leftHand.isValid && (leftHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool lb) && lb)) menuPressed = true;
+        bool leftNow = false;
+        if (leftHand.isValid && leftHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool lb)) leftNow = lb;
+        if (leftNow && !prevLeftMenuButton) menuPressedThisFrame = true;
+        prevLeftMenuButton = leftNow;
         
         UnityEngine.XR.InputDevice rightHand = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.RightHand);
-        if (rightHand.isValid && (rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool rb) && rb)) menuPressed = true;
+        bool rightNow = false;
+        if (rightHand.isValid && rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool rb)) rightNow = rb;
+        if (rightNow && !prevRightMenuButton) menuPressedThisFrame = true;
+        prevRightMenuButton = rightNow;
 
-        if (menuPressed)
+        if (menuPressedThisFrame)
         {
             var mm = FindFirstObjectByType<MenuManager>();
             if (mm != null)
@@ -181,6 +200,36 @@ public class GameManager : MonoBehaviour
                 EndGame();
                 mm.ShowMainMenu();
             }
+        }
+    }
+
+    private void HandleRestartInput()
+    {
+        // Keyboard fallback (Editor)
+        bool restartPressedThisFrame = false;
+        if (Keyboard.current != null && Keyboard.current[Key.R].isPressed && !prevRightPrimaryButton)
+            restartPressedThisFrame = true;
+
+        // Right hand controller primary button (PICO: usually A / X depending on profile).
+        UnityEngine.XR.InputDevice rightHand = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.RightHand);
+        bool rightPrimaryNow = false;
+        if (rightHand.isValid && rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out bool pb))
+            rightPrimaryNow = pb;
+
+        if (rightPrimaryNow && !prevRightPrimaryButton)
+            restartPressedThisFrame = true;
+
+        prevRightPrimaryButton = rightPrimaryNow;
+
+        if (!restartPressedThisFrame) return;
+
+        // Restart current mode with current settings.
+        StartGame();
+        var mm = FindFirstObjectByType<MenuManager>();
+        if (mm != null)
+        {
+            // Hide menus if they are up
+            mm.SendMessage("HideMenusAndShowGameUI", SendMessageOptions.DontRequireReceiver);
         }
     }
 
@@ -285,10 +334,12 @@ public class GameManager : MonoBehaviour
         currentStrikes = 0;
         currentComboCount = 0;
         lastTickPlayedTime = 11f;
+        recipesCompleted = 0;
+        recipeTotalCount = 0;
         OnScoreChanged?.Invoke(score);
         OnTimeChanged?.Invoke(currentTime);
         OnStrikeChanged?.Invoke(currentStrikes, maxStrikes);
-        // If Recette mode, reset recipe here
+        OnRecipeProgressChanged?.Invoke(0f);
     }
 
     public float GetDifficultyDelayMultiplier()
@@ -364,7 +415,9 @@ public class GameManager : MonoBehaviour
     public void GenerateRandomRecipe()
     {
         currentRecipe.Clear();
-        string[] allFruits = { "Pomme", "Citron", "Orange", "Kiwi", "Fraise" };
+        // Must match existing prefabs' `FruitTarget.ingredientName` values.
+        // Current project prefabs: Pomme, Citron, Fraise, Banane, Cerise, Pêche, Pasteque.
+        string[] allFruits = { "Pomme", "Citron", "Fraise", "Banane", "Cerise", "Pêche", "Pasteque" };
         
         // Choisir 2 ou 3 types de fruits au hasard
         int typesCount = Random.Range(2, 4);
@@ -381,14 +434,16 @@ public class GameManager : MonoBehaviour
             currentRecipe[fruit] = Random.Range(2, 5); // Entre 2 et 4 de chaque
         }
 
+        recipeTotalCount = GetRecipeRemainingCount();
         UpdateRecipeString();
+        OnRecipeProgressChanged?.Invoke(0f);
     }
 
     private void UpdateRecipeString()
     {
         if (currentRecipe.Count == 0)
         {
-            OnRecipeStringUpdated?.Invoke("Recette terminee !");
+            OnRecipeStringUpdated?.Invoke("Recette terminée !");
             return;
         }
 
@@ -398,6 +453,25 @@ public class GameManager : MonoBehaviour
             s += $"{kvp.Value} {kvp.Key}(s), ";
         }
         OnRecipeStringUpdated?.Invoke(s.TrimEnd(',', ' '));
+    }
+
+    private int GetRecipeRemainingCount()
+    {
+        int remaining = 0;
+        foreach (var kv in currentRecipe) remaining += Mathf.Max(0, kv.Value);
+        return remaining;
+    }
+
+    private void EmitRecipeProgress()
+    {
+        if (recipeTotalCount <= 0)
+        {
+            OnRecipeProgressChanged?.Invoke(0f);
+            return;
+        }
+        var remaining = GetRecipeRemainingCount();
+        var progress = Mathf.Clamp01(1f - (remaining / (float)recipeTotalCount));
+        OnRecipeProgressChanged?.Invoke(progress);
     }
 
     public void ProcessFruitSlice(string fruitName)
@@ -415,11 +489,19 @@ public class GameManager : MonoBehaviour
                 currentRecipe[fruitName]--;
                 if (currentRecipe[fruitName] <= 0) currentRecipe.Remove(fruitName);
                 
-                AddScore(15); // Petit bonus pour le bon fruit
                 UpdateRecipeString();
+                EmitRecipeProgress();
 
                 // Si tout est fini, on regenere une petite suite
-                if (currentRecipe.Count == 0) GenerateRandomRecipe();
+                if (currentRecipe.Count == 0)
+                {
+                    recipesCompleted++;
+                    // Mode Recette: le score = nombre de recettes réussies (objectif: en faire un max).
+                    score = recipesCompleted;
+                    OnScoreChanged?.Invoke(score);
+                    OnRecipeCompleted?.Invoke();
+                    GenerateRandomRecipe();
+                }
             }
             else
             {

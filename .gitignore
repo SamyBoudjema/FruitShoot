@@ -7,6 +7,7 @@
 [Ll]ogs/
 [Mm]emoryCaptures/
 [Uu]ser[Ss]ettings/
+out/
 
 # Never ignore Asset meta data
 ![Aa]ssets/**/*.meta

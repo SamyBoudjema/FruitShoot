@@ -14,7 +14,11 @@ public class LaserShooter : MonoBehaviour
 
     [Header("Sabre Laser Settings")]
     public float sabreLength = 2000.0f; // Longueur quasi infinie pour tout toucher
-    public float sabreWidth = 0.07f;    // Largeur du sabre (affinée pour look Pro)
+    public float sabreWidth = 0.05f;    // Largeur du sabre (un peu plus fin)
+    [Tooltip("Rayon de slice en mode sabre (hitbox). Plus petit = plus précis.")]
+    public float sabreSliceRadius = 0.07f;
+    [Tooltip("Longueur utile de détection (en mètres). Garder raisonnable pour les perfs.")]
+    public float sabreHitLength = 8f;
     public Color sabreColor = new Color(0.2f, 0.6f, 1f, 0.9f);
     [Tooltip("Son d'activation du sabre (ignition).")]
     public AudioClip sabreIgniteSound;
@@ -43,6 +47,9 @@ public class LaserShooter : MonoBehaviour
     private AudioSource sabreHumSource;
     private Vector3 lastSabrePosition;
     private float lastSwingTime;
+
+    // Reuse buffer to avoid allocations every frame
+    private readonly Collider[] sabreOverlapBuffer = new Collider[64];
 
     void Awake()
     {
@@ -296,22 +303,41 @@ public class LaserShooter : MonoBehaviour
             int finalMask = (sliceLayerMask.value == 0) ? -1 : sliceLayerMask.value;
 
             // === DÉTECTION ET TRANCHAGE ===
-            RaycastHit[] sliceHits = Physics.SphereCastAll(origin, 0.25f, direction, 2000.0f, finalMask);
-            
-            foreach (var hit in sliceHits)
+            // Most reliable: overlap a capsule along the blade.
+            float radius = Mathf.Clamp(sabreSliceRadius, 0.02f, 0.20f);
+            float len = Mathf.Clamp(sabreHitLength, 0.5f, 25f);
+            var p1 = origin;
+            var p2 = origin + direction * len;
+
+            int hits = Physics.OverlapCapsuleNonAlloc(
+                p1,
+                p2,
+                radius,
+                sabreOverlapBuffer,
+                finalMask,
+                QueryTriggerInteraction.Collide
+            );
+
+            for (int i = 0; i < hits; i++)
             {
-                int id = hit.collider.gameObject.GetInstanceID();
+                var col = sabreOverlapBuffer[i];
+                if (col == null) continue;
+
+                int id = col.gameObject.GetInstanceID();
                 if (recentlySlicedIds.Contains(id)) continue;
 
-                FruitTarget fruit = hit.collider.GetComponent<FruitTarget>();
+                // Approx contact point for VFX
+                var contact = col.ClosestPoint(origin);
+
+                FruitTarget fruit = col.GetComponent<FruitTarget>();
                 if (fruit != null)
                 {
-                    fruit.Slice(direction, hit.point, direction * 10f);
+                    fruit.Slice(direction, contact, direction * 10f);
                     recentlySlicedIds.Add(id);
                     continue;
                 }
 
-                Bomb bomb = hit.collider.GetComponent<Bomb>();
+                Bomb bomb = col.GetComponent<Bomb>();
                 if (bomb != null)
                 {
                     bomb.Slice();
