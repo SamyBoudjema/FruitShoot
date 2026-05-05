@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -21,6 +22,8 @@ public class RecipeUI : MonoBehaviour
     private RectTransform orderTabletRect;
     private bool orderTabletPlaced;
     private Transform orderTabletAnchor;
+    private Image recipeFlashOverlay;
+    private Coroutine recipeCompleteFxCoroutine;
     [Header("Order tablet")]
     [Tooltip("Flip the tablet 180° around Y if text appears reversed.")]
     public bool flipOrderTabletYaw = true;
@@ -352,6 +355,21 @@ public class RecipeUI : MonoBehaviour
         paperRt.anchoredPosition = new Vector2(0, -15);
         paperRt.sizeDelta = new Vector2(580, 380);
 
+        var flashGo = new GameObject("RecipeFlashOverlay");
+        flashGo.layer = orderTabletRoot.layer;
+        flashGo.transform.SetParent(bgGo.transform, false);
+        flashGo.transform.SetAsLastSibling();
+        var flashRt = flashGo.AddComponent<RectTransform>();
+        flashRt.anchorMin = Vector2.zero;
+        flashRt.anchorMax = Vector2.one;
+        flashRt.offsetMin = Vector2.zero;
+        flashRt.offsetMax = Vector2.zero;
+        recipeFlashOverlay = flashGo.AddComponent<Image>();
+        var w = Texture2D.whiteTexture;
+        recipeFlashOverlay.sprite = Sprite.Create(w, new Rect(0, 0, w.width, w.height), new Vector2(0.5f, 0.5f), 100f);
+        recipeFlashOverlay.color = new Color(1f, 1f, 0.92f, 0f);
+        recipeFlashOverlay.raycastTarget = false;
+
         // Re-parent recipe text into the tablet (list style)
         if (recipeText != null)
         {
@@ -467,9 +485,44 @@ public class RecipeUI : MonoBehaviour
 
     public void ShowRecipeCompleted()
     {
-        if (recipeToast == null) return;
-        recipeToast.text = "RECETTE RÉUSSIE !";
-        recipeToast.gameObject.SetActive(true);
-        toastHideTime = Time.time + 1.0f;
+        if (recipeToast != null)
+        {
+            recipeToast.text = "RECETTE RÉUSSIE !";
+            recipeToast.gameObject.SetActive(true);
+            toastHideTime = Time.time + 1.0f;
+        }
+
+        if (recipeCompleteFxCoroutine != null)
+            StopCoroutine(recipeCompleteFxCoroutine);
+        recipeCompleteFxCoroutine = StartCoroutine(RecipeCompletedFxRoutine());
+    }
+
+    private IEnumerator RecipeCompletedFxRoutine()
+    {
+        XRHaptics.PulseBothHands(0.92f, 0.14f);
+
+        if (recipeFlashOverlay != null)
+        {
+            recipeFlashOverlay.gameObject.SetActive(true);
+            const float dur = 0.34f;
+            for (float t = 0f; t < dur; t += Time.deltaTime)
+            {
+                float n = Mathf.Clamp01(t / dur);
+                float a = Mathf.Sin(n * Mathf.PI) * 0.52f;
+                var c = recipeFlashOverlay.color;
+                c.a = a;
+                recipeFlashOverlay.color = c;
+                yield return null;
+            }
+
+            var c0 = recipeFlashOverlay.color;
+            c0.a = 0f;
+            recipeFlashOverlay.color = c0;
+        }
+
+        yield return new WaitForSeconds(0.08f);
+        XRHaptics.PulseBothHands(0.55f, 0.11f);
+
+        recipeCompleteFxCoroutine = null;
     }
 }

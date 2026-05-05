@@ -6,7 +6,7 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/VR Ninja.unity
+    path: Assets/Scenes/FruitShoot.unity
     guid: 6da8a5c84bcebfa4882224bb0524a572
   m_configObjects:
     Unity.XR.Oculus.Settings: {fileID: 11400000, guid: ce18139cfa441194ebbca9060709159d,
